@@ -165,12 +165,13 @@ object OutputWriter:
        |      cursor: pointer;
        |      font-weight: 600;
        |    }
-       |    canvas {
+       |    svg.viewport {
        |      width: 100%;
        |      height: auto;
        |      border: 1px solid var(--line);
        |      border-radius: 10px;
        |      background: #fff;
+       |      display: block;
        |    }
        |    .legend {
        |      display: flex;
@@ -197,7 +198,7 @@ object OutputWriter:
        |    </div>
        |
        |    <div class="panel">
-       |      <canvas id="graph" width="1100" height="640"></canvas>
+       |      <svg id="graph" class="viewport" viewBox="0 0 1100 640" aria-label="Graph visualization"></svg>
        |      <div class="legend">
        |        <span><span class="dot" style="background: var(--sus)"></span>Susceptible</span>
        |        <span><span class="dot" style="background: var(--inf)"></span>Infected</span>
@@ -207,7 +208,7 @@ object OutputWriter:
        |    </div>
        |
        |    <div class="panel">
-       |      <canvas id="sir" width="1100" height="280"></canvas>
+       |      <svg id="sir" class="viewport" viewBox="0 0 1100 280" aria-label="SIR chart"></svg>
        |    </div>
        |  </div>
        |
@@ -216,13 +217,18 @@ object OutputWriter:
        |      nodeCount: ${result.graph.nodeCount},
        |      edges: $edgesJson,
        |      series: $seriesJson,
-       |      states: $statesJson
+       |      states: $statesJson,
+       |      layoutHint: "${result.layoutHint.getOrElse("")}"
        |    };
        |
-       |    const graphCanvas = document.getElementById("graph");
-       |    const graphCtx = graphCanvas.getContext("2d");
-       |    const sirCanvas = document.getElementById("sir");
-       |    const sirCtx = sirCanvas.getContext("2d");
+       |    const graphWidth = 1100;
+       |    const graphHeight = 640;
+       |    const chartWidth = 1100;
+       |    const chartHeight = 280;
+       |
+       |    const ns = "http://www.w3.org/2000/svg";
+       |    const graphSvg = document.getElementById("graph");
+       |    const sirSvg = document.getElementById("sir");
        |    const tickRange = document.getElementById("tickRange");
        |    const tickLabel = document.getElementById("tickLabel");
        |    const playButton = document.getElementById("play");
@@ -230,14 +236,51 @@ object OutputWriter:
        |
        |    const palette = { S: "#1f7a8c", I: "#d62828", R: "#588157" };
        |
-       |    const positions = Array.from({ length: data.nodeCount }, (_, idx) => {
-       |      const angle = (Math.PI * 2 * idx) / Math.max(1, data.nodeCount);
-       |      const radius = Math.min(graphCanvas.width, graphCanvas.height) * 0.38;
-       |      return {
-       |        x: graphCanvas.width / 2 + Math.cos(angle) * radius,
-       |        y: graphCanvas.height / 2 + Math.sin(angle) * radius
-       |      };
-       |    });
+       |    const make = (name, attrs) => {
+       |      const el = document.createElementNS(ns, name);
+       |      for (const [key, value] of Object.entries(attrs)) {
+       |        el.setAttribute(key, String(value));
+       |      }
+       |      return el;
+       |    };
+       |
+       |    const clear = svg => {
+       |      while (svg.firstChild) {
+       |        svg.removeChild(svg.firstChild);
+       |      }
+       |    };
+       |
+       |    const positions = (() => {
+       |      if (data.layoutHint === "clustered-vpn") {
+       |        const mid = Math.floor(data.nodeCount / 2);
+       |        const leftNodes = mid;
+       |        const rightNodes = data.nodeCount - mid;
+       |        const radius = Math.min(graphWidth, graphHeight) * 0.22;
+       |        const leftCenterX = graphWidth * 0.3;
+       |        const rightCenterX = graphWidth * 0.7;
+       |        const centerY = graphHeight * 0.52;
+       |
+       |        const cluster = (count, centerX) =>
+       |          Array.from({ length: count }, (_, idx) => {
+       |            const angle = (Math.PI * 2 * idx) / Math.max(1, count);
+       |            return {
+       |              x: centerX + Math.cos(angle) * radius,
+       |              y: centerY + Math.sin(angle) * radius
+       |            };
+       |          });
+       |
+       |        return [...cluster(leftNodes, leftCenterX), ...cluster(rightNodes, rightCenterX)];
+       |      }
+       |
+       |      return Array.from({ length: data.nodeCount }, (_, idx) => {
+       |        const angle = (Math.PI * 2 * idx) / Math.max(1, data.nodeCount);
+       |        const radius = Math.min(graphWidth, graphHeight) * 0.38;
+       |        return {
+       |          x: graphWidth / 2 + Math.cos(angle) * radius,
+       |          y: graphHeight / 2 + Math.sin(angle) * radius
+       |        };
+       |      });
+       |    })();
        |
        |    const isEdgeActive = (edge, tick) => {
        |      if (edge.on === 0) return false;
@@ -247,72 +290,112 @@ object OutputWriter:
        |    };
        |
        |    const renderGraph = tick => {
-       |      graphCtx.clearRect(0, 0, graphCanvas.width, graphCanvas.height);
-       |      graphCtx.lineWidth = 1;
+       |      clear(graphSvg);
        |
+       |      const edgeLayer = make("g", { "stroke-width": 1, fill: "none" });
        |      for (const edge of data.edges) {
        |        const active = isEdgeActive(edge, tick);
-       |        graphCtx.strokeStyle = active ? "rgba(43,43,43,0.28)" : "rgba(43,43,43,0.08)";
        |        const from = positions[edge.a];
        |        const to = positions[edge.b];
-       |        graphCtx.beginPath();
-       |        graphCtx.moveTo(from.x, from.y);
-       |        graphCtx.lineTo(to.x, to.y);
-       |        graphCtx.stroke();
+       |        edgeLayer.appendChild(
+       |          make("line", {
+       |            x1: from.x,
+       |            y1: from.y,
+       |            x2: to.x,
+       |            y2: to.y,
+       |            stroke: active ? "rgba(43,43,43,0.28)" : "rgba(43,43,43,0.08)"
+       |          })
+       |        );
        |      }
+       |      graphSvg.appendChild(edgeLayer);
        |
+       |      const nodeLayer = make("g", {});
        |      const statusLine = data.states[tick] || "";
        |      for (let node = 0; node < positions.length; node += 1) {
        |        const status = statusLine.charAt(node) || "S";
        |        const p = positions[node];
-       |        graphCtx.fillStyle = palette[status] || palette.S;
-       |        graphCtx.beginPath();
-       |        graphCtx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
-       |        graphCtx.fill();
+       |        nodeLayer.appendChild(
+       |          make("circle", {
+       |            cx: p.x,
+       |            cy: p.y,
+       |            r: 4.5,
+       |            fill: palette[status] || palette.S
+       |          })
+       |        );
        |      }
+       |      graphSvg.appendChild(nodeLayer);
+       |    };
+       |
+       |    const buildPath = (key, maxX, maxY, pad) => {
+       |      return data.series
+       |        .map((point, i) => {
+       |          const x = pad + (i / maxX) * (chartWidth - pad * 2);
+       |          const y = chartHeight - pad - (point[key] / maxY) * (chartHeight - pad * 2);
+       |          return (i === 0 ? "M" : "L") + x.toFixed(2) + " " + y.toFixed(2);
+       |        })
+       |        .join(" ");
        |    };
        |
        |    const renderSirChart = tick => {
-       |      sirCtx.clearRect(0, 0, sirCanvas.width, sirCanvas.height);
-       |      const w = sirCanvas.width;
-       |      const h = sirCanvas.height;
+       |      clear(sirSvg);
        |      const pad = 24;
        |      const maxY = Math.max(1, ...data.series.map(s => Math.max(s.susceptible, s.infected, s.recovered)));
        |      const maxX = Math.max(1, data.series.length - 1);
        |
-       |      const drawLine = (key, color) => {
-       |        sirCtx.strokeStyle = color;
-       |        sirCtx.lineWidth = 2;
-       |        sirCtx.beginPath();
-       |        data.series.forEach((point, i) => {
-       |          const x = pad + (i / maxX) * (w - pad * 2);
-       |          const y = h - pad - (point[key] / maxY) * (h - pad * 2);
-       |          if (i === 0) sirCtx.moveTo(x, y);
-       |          else sirCtx.lineTo(x, y);
-       |        });
-       |        sirCtx.stroke();
-       |      };
+       |      sirSvg.appendChild(
+       |        make("rect", {
+       |          x: pad,
+       |          y: pad,
+       |          width: chartWidth - pad * 2,
+       |          height: chartHeight - pad * 2,
+       |          fill: "none",
+       |          stroke: "rgba(0,0,0,0.2)"
+       |        })
+       |      );
        |
-       |      sirCtx.strokeStyle = "rgba(0,0,0,0.2)";
-       |      sirCtx.strokeRect(pad, pad, w - pad * 2, h - pad * 2);
+       |      sirSvg.appendChild(
+       |        make("path", {
+       |          d: buildPath("susceptible", maxX, maxY, pad),
+       |          fill: "none",
+       |          stroke: palette.S,
+       |          "stroke-width": 2
+       |        })
+       |      );
+       |      sirSvg.appendChild(
+       |        make("path", {
+       |          d: buildPath("infected", maxX, maxY, pad),
+       |          fill: "none",
+       |          stroke: palette.I,
+       |          "stroke-width": 2
+       |        })
+       |      );
+       |      sirSvg.appendChild(
+       |        make("path", {
+       |          d: buildPath("recovered", maxX, maxY, pad),
+       |          fill: "none",
+       |          stroke: palette.R,
+       |          "stroke-width": 2
+       |        })
+       |      );
        |
-       |      drawLine("susceptible", palette.S);
-       |      drawLine("infected", palette.I);
-       |      drawLine("recovered", palette.R);
-       |
-       |      const markerX = pad + (tick / maxX) * (w - pad * 2);
-       |      sirCtx.strokeStyle = "rgba(0,0,0,0.35)";
-       |      sirCtx.beginPath();
-       |      sirCtx.moveTo(markerX, pad);
-       |      sirCtx.lineTo(markerX, h - pad);
-       |      sirCtx.stroke();
+       |      const markerX = pad + (tick / maxX) * (chartWidth - pad * 2);
+       |      sirSvg.appendChild(
+       |        make("line", {
+       |          x1: markerX,
+       |          y1: pad,
+       |          x2: markerX,
+       |          y2: chartHeight - pad,
+       |          stroke: "rgba(0,0,0,0.35)",
+       |          "stroke-width": 1
+       |        })
+       |      );
        |    };
        |
        |    let currentTick = 0;
        |    let timer = null;
        |
        |    const render = () => {
-       |      tickLabel.textContent = `tick: ${'$'}{currentTick}`;
+       |      tickLabel.textContent = "tick: " + currentTick;
        |      tickRange.value = currentTick;
        |      renderGraph(currentTick);
        |      renderSirChart(currentTick);

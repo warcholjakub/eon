@@ -3,6 +3,7 @@ package eon.epidemic.core
 enum GraphShape:
   case ErdosRenyi
   case Ring
+  case ClusteredVpn
 
 final case class EdgeActivation(onTicks: Int, offTicks: Int, phase: Int = 0):
   require(onTicks >= 0, "onTicks must be >= 0")
@@ -80,10 +81,15 @@ object GraphSpec:
 final case class StopCondition(stopWhenNoInfected: Boolean, maxTicks: Int):
   require(maxTicks >= 0, "maxTicks must be >= 0")
 
+enum DiseaseModel:
+  case SIR
+  case SIS
+
 final case class SimulationConfig(
     infectionProbability: Double,
     recoveryProbability: Double,
     initialInfected: Set[Int],
+    diseaseModel: DiseaseModel,
     stopCondition: StopCondition,
     seed: Long,
     graphSpec: GraphSpec,
@@ -121,7 +127,8 @@ final case class SimulationResult(
     summary: SimulationSummary,
     timeseries: Vector[TickSnapshot],
     tickNodeStates: Option[Vector[TickNodeStates]],
-    graph: Graph
+    graph: Graph,
+    layoutHint: Option[String]
 )
 
 final case class AggregateMetrics(

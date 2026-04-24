@@ -25,6 +25,7 @@ object CliParser:
         opt[Int]("activation-phase").action((value, state) => state.copy(activationPhase = Some(value))),
         opt[Double]("infection-probability").action((value, state) => state.copy(infectionProbability = Some(value))),
         opt[Double]("recovery-probability").action((value, state) => state.copy(recoveryProbability = Some(value))),
+        opt[String]("model").action((value, state) => state.copy(diseaseModel = Some(value))),
         opt[Int]("max-ticks").action((value, state) => state.copy(maxTicks = Some(value))),
         opt[Boolean]("stop-when-no-infected").action((value, state) => state.copy(stopWhenNoInfected = Some(value))),
         opt[String]("initial-infected").action((value, state) => state.copy(initialInfected = Some(value))),

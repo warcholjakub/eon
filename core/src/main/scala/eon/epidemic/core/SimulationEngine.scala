@@ -57,7 +57,8 @@ object SimulationEngine:
             summary = summary,
             timeseries = finalState.timeseries,
             tickNodeStates = finalState.tickNodeStates,
-            graph = graph
+            graph = graph,
+            layoutHint = layoutHint(config.graphSpec)
           )
 
   private final case class SimState(
@@ -113,9 +114,20 @@ object SimulationEngine:
         rng = rng
       )
 
-    val nextInfected = (state.infected -- newRecovered) ++ newInfected
-    val nextRecovered = state.recovered ++ newRecovered
-    val nextSusceptible = state.susceptible -- newInfected
+    val (nextInfected, nextRecovered, nextSusceptible) =
+      config.diseaseModel match
+        case DiseaseModel.SIR =>
+          (
+            (state.infected -- newRecovered) ++ newInfected,
+            state.recovered ++ newRecovered,
+            state.susceptible -- newInfected
+          )
+        case DiseaseModel.SIS =>
+          (
+            (state.infected -- newRecovered) ++ newInfected,
+            Set.empty[Int],
+            (state.susceptible ++ newRecovered) -- newInfected
+          )
     val nextEverInfected = state.everInfected ++ newInfected
     val nextTick = state.tick + 1
 
@@ -222,3 +234,9 @@ object SimulationEngine:
     else if recoveredSusceptibleOverlap.nonEmpty then Left(s"invalid state partition at tick ${state.tick}: recovered/susceptible overlap")
     else if union != allNodes then Left(s"invalid state partition at tick ${state.tick}: node coverage mismatch")
     else Right(())
+
+  private def layoutHint(spec: GraphSpec): Option[String] =
+    spec match
+      case generated: GraphSpec.Generated if generated.shape == GraphShape.ClusteredVpn =>
+        Some("clustered-vpn")
+      case _ => None

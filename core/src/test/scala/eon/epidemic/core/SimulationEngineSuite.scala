@@ -21,6 +21,7 @@ class SimulationEngineSuite extends FunSuite:
       infectionProbability = 1.0,
       recoveryProbability = 0.0,
       initialInfected = Set(0),
+      diseaseModel = DiseaseModel.SIR,
       stopCondition = StopCondition(stopWhenNoInfected = true, maxTicks = 3),
       seed = 123,
       graphSpec = GraphSpec.Generated(
@@ -48,6 +49,7 @@ class SimulationEngineSuite extends FunSuite:
       infectionProbability = 0.0,
       recoveryProbability = 0.0,
       initialInfected = Set(0),
+      diseaseModel = DiseaseModel.SIR,
       stopCondition = StopCondition(stopWhenNoInfected = true, maxTicks = 5),
       seed = 1,
       graphSpec = GraphSpec.Generated(
@@ -69,6 +71,7 @@ class SimulationEngineSuite extends FunSuite:
       infectionProbability = 0.1,
       recoveryProbability = 0.2,
       initialInfected = Set(0),
+      diseaseModel = DiseaseModel.SIR,
       stopCondition = StopCondition(stopWhenNoInfected = true, maxTicks = 10),
       seed = 42,
       graphSpec = GraphSpec.Generated(
@@ -92,6 +95,7 @@ class SimulationEngineSuite extends FunSuite:
       infectionProbability = 0.0,
       recoveryProbability = 1.0,
       initialInfected = Set(0),
+      diseaseModel = DiseaseModel.SIR,
       stopCondition = StopCondition(stopWhenNoInfected = true, maxTicks = 3),
       seed = 1,
       graphSpec = GraphSpec.Generated(
@@ -128,6 +132,7 @@ class SimulationEngineSuite extends FunSuite:
       infectionProbability = 0.45,
       recoveryProbability = 0.25,
       initialInfected = Set(0, 2),
+      diseaseModel = DiseaseModel.SIR,
       stopCondition = StopCondition(stopWhenNoInfected = true, maxTicks = 30),
       seed = 777,
       graphSpec = GraphSpec.Generated(
@@ -153,6 +158,7 @@ class SimulationEngineSuite extends FunSuite:
       infectionProbability = 0.2,
       recoveryProbability = 0.1,
       initialInfected = Set(0),
+      diseaseModel = DiseaseModel.SIR,
       stopCondition = StopCondition(stopWhenNoInfected = true, maxTicks = 20),
       seed = 100,
       graphSpec = GraphSpec.Generated(
@@ -177,6 +183,7 @@ class SimulationEngineSuite extends FunSuite:
       infectionProbability = 0.2,
       recoveryProbability = 0.1,
       initialInfected = Set(0),
+      diseaseModel = DiseaseModel.SIR,
       stopCondition = StopCondition(stopWhenNoInfected = true, maxTicks = 20),
       seed = 50,
       graphSpec = GraphSpec.FromFile(
@@ -191,3 +198,28 @@ class SimulationEngineSuite extends FunSuite:
 
     assertEquals(run.seed, 52L)
     assertEquals(run.graphSpec, base.graphSpec)
+
+  test("SIS model moves recovered nodes back to susceptible"):
+    val graph = Graph.fromEdges(nodeCount = 1, rawEdges = Vector.empty).toOption.get
+
+    val config = SimulationConfig(
+      infectionProbability = 0.0,
+      recoveryProbability = 1.0,
+      initialInfected = Set(0),
+      diseaseModel = DiseaseModel.SIS,
+      stopCondition = StopCondition(stopWhenNoInfected = true, maxTicks = 3),
+      seed = 10,
+      graphSpec = GraphSpec.Generated(
+        shape = GraphShape.ErdosRenyi,
+        nodeCount = 1,
+        edgeActivation = EdgeActivation(1, 0),
+        erdosProbability = 0.0,
+        ringDegree = 0,
+        seed = 10
+      ),
+      collectNodeStates = true
+    )
+
+    val result = SimulationEngine.runWithGraph(config, graph).toOption.get
+    assertEquals(result.summary.finalSusceptible, 1)
+    assertEquals(result.summary.finalRecovered, 0)

@@ -3,6 +3,7 @@ package eon.epidemic.cli
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
 import com.typesafe.config.ConfigValueType
+import eon.epidemic.core.DiseaseModel
 import eon.epidemic.core.EdgeActivation
 import eon.epidemic.core.GraphShape
 
@@ -24,6 +25,7 @@ final case class CliSettings(
     activation: EdgeActivation,
     infectionProbability: Double,
     recoveryProbability: Double,
+    diseaseModel: DiseaseModel,
     maxTicks: Int,
     stopWhenNoInfected: Boolean,
     initialInfected: String,
@@ -48,6 +50,7 @@ object CliSettings:
       activation = EdgeActivation(onTicks = 1, offTicks = 0, phase = 0),
       infectionProbability = 0.08,
       recoveryProbability = 0.05,
+      diseaseModel = DiseaseModel.SIR,
       maxTicks = 400,
       stopWhenNoInfected = true,
       initialInfected = "0",
@@ -90,6 +93,20 @@ object ScenarioPresets:
           maxTicks = 500,
           runs = 20
         )
+      ),
+      "office-vpn" -> (settings =>
+        settings.copy(
+          graphSource = "generated",
+          graphShape = GraphShape.ClusteredVpn,
+          nodeCount = 240,
+          edgeProbability = 0.08,
+          ringDegree = 2,
+          infectionProbability = 0.07,
+          recoveryProbability = 0.04,
+          activation = settings.activation.copy(onTicks = 4, offTicks = 1),
+          maxTicks = 700,
+          runs = 20
+        )
       )
     )
 
@@ -115,6 +132,7 @@ final case class CliOverrides(
     activationPhase: Option[Int] = None,
     infectionProbability: Option[Double] = None,
     recoveryProbability: Option[Double] = None,
+    diseaseModel: Option[String] = None,
     maxTicks: Option[Int] = None,
     stopWhenNoInfected: Option[Boolean] = None,
     initialInfected: Option[String] = None,
@@ -145,37 +163,40 @@ object ConfigFileLoader:
     baseWithPresetEither.flatMap: baseWithPreset =>
       val effectivePreset = overrides.preset.map(_.toLowerCase).orElse(baseWithPreset.preset)
       parseGraphShape(overrides.graphShape.getOrElse(baseWithPreset.graphShape.toString)).flatMap: shape =>
-        val activationEither =
-          buildActivation(
-            onTicks = overrides.activationOnTicks.getOrElse(baseWithPreset.activation.onTicks),
-            offTicks = overrides.activationOffTicks.getOrElse(baseWithPreset.activation.offTicks),
-            phase = overrides.activationPhase.getOrElse(baseWithPreset.activation.phase)
-          )
+        parseDiseaseModel(overrides.diseaseModel.getOrElse(baseWithPreset.diseaseModel.toString)).flatMap:
+          diseaseModel =>
+            val activationEither =
+              buildActivation(
+                onTicks = overrides.activationOnTicks.getOrElse(baseWithPreset.activation.onTicks),
+                offTicks = overrides.activationOffTicks.getOrElse(baseWithPreset.activation.offTicks),
+                phase = overrides.activationPhase.getOrElse(baseWithPreset.activation.phase)
+              )
 
-        activationEither.flatMap: activation =>
-          val merged = baseWithPreset.copy(
-            preset = effectivePreset,
-            graphSource = overrides.graphSource.getOrElse(baseWithPreset.graphSource),
-            graphShape = shape,
-            graphFile = overrides.graphFile.orElse(baseWithPreset.graphFile),
-            explicitNodeCount = overrides.explicitNodeCount.orElse(baseWithPreset.explicitNodeCount),
-            nodeCount = overrides.nodeCount.getOrElse(baseWithPreset.nodeCount),
-            edgeProbability = overrides.edgeProbability.getOrElse(baseWithPreset.edgeProbability),
-            ringDegree = overrides.ringDegree.getOrElse(baseWithPreset.ringDegree),
-            activation = activation,
-            infectionProbability = overrides.infectionProbability.getOrElse(baseWithPreset.infectionProbability),
-            recoveryProbability = overrides.recoveryProbability.getOrElse(baseWithPreset.recoveryProbability),
-            maxTicks = overrides.maxTicks.getOrElse(baseWithPreset.maxTicks),
-            stopWhenNoInfected = overrides.stopWhenNoInfected.getOrElse(baseWithPreset.stopWhenNoInfected),
-            initialInfected = overrides.initialInfected.getOrElse(baseWithPreset.initialInfected),
-            initialInfectedCount = overrides.initialInfectedCount.orElse(baseWithPreset.initialInfectedCount),
-            seed = overrides.seed.getOrElse(baseWithPreset.seed),
-            runs = overrides.runs.getOrElse(baseWithPreset.runs),
-            outputDir = overrides.outputDir.getOrElse(baseWithPreset.outputDir),
-            visualizationEnabled =
-              overrides.visualizationEnabled.getOrElse(baseWithPreset.visualizationEnabled)
-          )
-          validateSettings(merged)
+            activationEither.flatMap: activation =>
+              val merged = baseWithPreset.copy(
+                preset = effectivePreset,
+                graphSource = overrides.graphSource.getOrElse(baseWithPreset.graphSource),
+                graphShape = shape,
+                graphFile = overrides.graphFile.orElse(baseWithPreset.graphFile),
+                explicitNodeCount = overrides.explicitNodeCount.orElse(baseWithPreset.explicitNodeCount),
+                nodeCount = overrides.nodeCount.getOrElse(baseWithPreset.nodeCount),
+                edgeProbability = overrides.edgeProbability.getOrElse(baseWithPreset.edgeProbability),
+                ringDegree = overrides.ringDegree.getOrElse(baseWithPreset.ringDegree),
+                activation = activation,
+                infectionProbability = overrides.infectionProbability.getOrElse(baseWithPreset.infectionProbability),
+                recoveryProbability = overrides.recoveryProbability.getOrElse(baseWithPreset.recoveryProbability),
+                diseaseModel = diseaseModel,
+                maxTicks = overrides.maxTicks.getOrElse(baseWithPreset.maxTicks),
+                stopWhenNoInfected = overrides.stopWhenNoInfected.getOrElse(baseWithPreset.stopWhenNoInfected),
+                initialInfected = overrides.initialInfected.getOrElse(baseWithPreset.initialInfected),
+                initialInfectedCount = overrides.initialInfectedCount.orElse(baseWithPreset.initialInfectedCount),
+                seed = overrides.seed.getOrElse(baseWithPreset.seed),
+                runs = overrides.runs.getOrElse(baseWithPreset.runs),
+                outputDir = overrides.outputDir.getOrElse(baseWithPreset.outputDir),
+                visualizationEnabled =
+                  overrides.visualizationEnabled.getOrElse(baseWithPreset.visualizationEnabled)
+              )
+              validateSettings(merged)
 
   private def validateSettings(settings: CliSettings): Either[String, CliSettings] =
     if settings.runs < 1 then Left("runs must be >= 1")
@@ -212,6 +233,7 @@ object ConfigFileLoader:
         activationPhase = map.get("activationPhase").flatMap(_.toIntOption),
         infectionProbability = map.get("infectionProbability").flatMap(_.toDoubleOption),
         recoveryProbability = map.get("recoveryProbability").flatMap(_.toDoubleOption),
+        diseaseModel = map.get("model"),
         maxTicks = map.get("maxTicks").flatMap(_.toIntOption),
         stopWhenNoInfected = map.get("stopWhenNoInfected").flatMap(_.toBooleanOption),
         initialInfected = map.get("initialInfected"),
@@ -241,6 +263,7 @@ object ConfigFileLoader:
           activationPhase = getInt(config, "graph.activation.phase", "activationPhase"),
           infectionProbability = getDouble(config, "simulation.infection-probability", "simulation.infectionProbability", "infectionProbability"),
           recoveryProbability = getDouble(config, "simulation.recovery-probability", "simulation.recoveryProbability", "recoveryProbability"),
+          diseaseModel = getString(config, "simulation.model", "model"),
           maxTicks = getInt(config, "simulation.max-ticks", "simulation.maxTicks", "maxTicks"),
           stopWhenNoInfected = getBoolean(config, "simulation.stop-when-no-infected", "simulation.stopWhenNoInfected", "stopWhenNoInfected"),
           initialInfected = initialInfected,
@@ -289,4 +312,11 @@ object ConfigFileLoader:
     raw.toLowerCase match
       case "erdos" | "erdosrenyi" | "erdos-renyi" => Right(GraphShape.ErdosRenyi)
       case "ring"                                   => Right(GraphShape.Ring)
+      case "clustered-vpn" | "clusteredvpn" | "office-vpn" => Right(GraphShape.ClusteredVpn)
       case other                                     => Left(s"unsupported graph shape: $other")
+
+  private def parseDiseaseModel(raw: String): Either[String, DiseaseModel] =
+    raw.toLowerCase match
+      case "sir" => Right(DiseaseModel.SIR)
+      case "sis" => Right(DiseaseModel.SIS)
+      case other => Left(s"unsupported disease model: $other")

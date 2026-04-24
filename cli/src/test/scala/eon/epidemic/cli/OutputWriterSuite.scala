@@ -66,5 +66,6 @@ class OutputWriterSuite extends FunSuite:
           TickSnapshot(tick = 1, susceptible = 1, infected = 0, recovered = 1)
         ),
       tickNodeStates = tickNodeStates,
-      graph = graph
+      graph = graph,
+      layoutHint = None
     )

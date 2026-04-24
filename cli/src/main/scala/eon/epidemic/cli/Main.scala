@@ -71,6 +71,7 @@ object Main:
           infectionProbability = settings.infectionProbability,
           recoveryProbability = settings.recoveryProbability,
           initialInfected = infected,
+          diseaseModel = settings.diseaseModel,
           stopCondition = StopCondition(
             stopWhenNoInfected = settings.stopWhenNoInfected,
             maxTicks = settings.maxTicks
