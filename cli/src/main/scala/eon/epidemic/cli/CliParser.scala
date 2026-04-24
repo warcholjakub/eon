@@ -38,7 +38,7 @@ object CliParser:
       )
 
     OParser.parse(parser, args, CliOverrides()) match
-      case None => Left("failed to parse CLI arguments")
+      case None => Left("failed to parse CLI arguments; run with --help to see available options")
       case Some(overrides) =>
         val baseSettings =
           overrides.configFile match

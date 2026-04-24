@@ -16,14 +16,18 @@ object OutputWriter:
       result: SimulationResult,
       writeVisualization: Boolean
   ): Either[String, Unit] =
-    withOutputDir(outputDir): dir =>
-      val summaryPath = dir.resolve("summary.json")
-      val timeseriesPath = dir.resolve("timeseries.csv")
-      val visualizationPath = dir.resolve("visualization.html")
-      Files.writeString(summaryPath, renderSummaryJson(result.summary))
-      Files.writeString(timeseriesPath, renderTimeseriesCsv(result.timeseries))
-      if writeVisualization then
-        renderVisualizationHtml(result).foreach(html => Files.writeString(visualizationPath, html))
+    if writeVisualization && result.tickNodeStates.isEmpty then
+      Left("visualization requested but node states are missing")
+    else
+      withOutputDir(outputDir): dir =>
+        val summaryPath = dir.resolve("summary.json")
+        val timeseriesPath = dir.resolve("timeseries.csv")
+        val visualizationPath = dir.resolve("visualization.html")
+        Files.writeString(summaryPath, renderSummaryJson(result.summary))
+        Files.writeString(timeseriesPath, renderTimeseriesCsv(result.timeseries))
+        if writeVisualization then
+          val html = renderVisualizationHtml(result, result.tickNodeStates.getOrElse(Vector.empty))
+          Files.writeString(visualizationPath, html)
 
   def writeBatch(outputDir: String, result: BatchResult): Either[String, Unit] =
     withOutputDir(outputDir): dir =>
@@ -86,7 +90,10 @@ object OutputWriter:
 
     (header +: rows).mkString("\n") + "\n"
 
-  private def renderVisualizationHtml(result: SimulationResult): Option[String] =
+  private def renderVisualizationHtml(
+      result: SimulationResult,
+      nodeStates: Vector[TickNodeStates]
+  ): String =
     val seriesJson =
       result.timeseries
         .map(snapshot =>
@@ -101,14 +108,13 @@ object OutputWriter:
         )
         .mkString("[", ",", "]")
 
-    result.tickNodeStates.map: nodeStates =>
-      val statesJson =
-        nodeStates
-          .map(encodeTickStates)
-          .map(encoded => s"\"$encoded\"")
-          .mkString("[", ",", "]")
+    val statesJson =
+      nodeStates
+        .map(encodeTickStates)
+        .map(encoded => s"\"$encoded\"")
+        .mkString("[", ",", "]")
 
-      s"""<!doctype html>
+    s"""<!doctype html>
        |<html lang="en">
        |<head>
        |  <meta charset="utf-8" />

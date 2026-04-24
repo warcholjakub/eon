@@ -51,7 +51,9 @@ object GraphBuilder:
       Using(Source.fromFile(spec.path)): source =>
         source.getLines().zipWithIndex.toVector
 
-    loaded.toEither.left.map(_.getMessage).flatMap: lines =>
+    loaded.toEither.left.map: error =>
+      s"failed to read graph file '${spec.path}': ${error.toString}"
+    .flatMap: lines =>
       val parsed = lines.foldLeft[Either[String, Vector[Edge]]](Right(Vector.empty)):
         case (accEither, (line, index)) =>
           accEither.flatMap: acc =>
