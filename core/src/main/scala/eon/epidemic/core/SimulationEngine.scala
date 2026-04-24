@@ -8,7 +8,7 @@ object SimulationEngine:
     GraphBuilder.build(config.graphSpec).flatMap(graph => runWithGraph(config, graph))
 
   def runWithGraph(config: SimulationConfig, graph: Graph): Either[String, SimulationResult] =
-    validateConfig(config, graph).map: _ =>
+    validateConfig(config, graph).flatMap: _ =>
       val rng = Random(config.seed)
       val allNodes = (0 until graph.nodeCount).toSet
       val initialInfected = config.initialInfected
@@ -40,23 +40,25 @@ object SimulationEngine:
         peakTick = 0
       )
 
-      val finalState = loop(initialState, config, graph, rng)
-      val summary = SimulationSummary(
-        totalEverInfected = finalState.everInfected.size,
-        epidemicDurationTicks = finalState.tick,
-        peakInfected = finalState.peakInfected,
-        peakTick = finalState.peakTick,
-        finalSusceptible = finalState.susceptible.size,
-        finalInfected = finalState.infected.size,
-        finalRecovered = finalState.recovered.size
-      )
+      validatePartition(initialState, graph.nodeCount)
+        .flatMap(_ => loop(Right(initialState), config, graph, rng))
+        .map: finalState =>
+          val summary = SimulationSummary(
+            totalEverInfected = finalState.everInfected.size,
+            epidemicDurationTicks = finalState.tick,
+            peakInfected = finalState.peakInfected,
+            peakTick = finalState.peakTick,
+            finalSusceptible = finalState.susceptible.size,
+            finalInfected = finalState.infected.size,
+            finalRecovered = finalState.recovered.size
+          )
 
-      SimulationResult(
-        summary = summary,
-        timeseries = finalState.timeseries,
-        tickNodeStates = finalState.tickNodeStates,
-        graph = graph
-      )
+          SimulationResult(
+            summary = summary,
+            timeseries = finalState.timeseries,
+            tickNodeStates = finalState.tickNodeStates,
+            graph = graph
+          )
 
   private final case class SimState(
       tick: Int,
@@ -72,20 +74,23 @@ object SimulationEngine:
 
   @tailrec
   private def loop(
-      state: SimState,
+      stateEither: Either[String, SimState],
       config: SimulationConfig,
       graph: Graph,
       rng: Random
-  ): SimState =
-    if shouldStop(state, config.stopCondition) then state
-    else loop(step(state, config, graph, rng), config, graph, rng)
+  ): Either[String, SimState] =
+    stateEither match
+      case Left(error) => Left(error)
+      case Right(state) =>
+        if shouldStop(state, config.stopCondition) then Right(state)
+        else loop(step(state, config, graph, rng), config, graph, rng)
 
   private def step(
       state: SimState,
       config: SimulationConfig,
       graph: Graph,
       rng: Random
-  ): SimState =
+  ): Either[String, SimState] =
     val infectionCandidates =
       state.infected.toVector
         .flatMap: infectedNode =>
@@ -138,7 +143,7 @@ object SimulationEngine:
             )
         )
 
-    state.copy(
+    val nextState = state.copy(
       tick = nextTick,
       susceptible = nextSusceptible,
       infected = nextInfected,
@@ -149,6 +154,8 @@ object SimulationEngine:
       peakInfected = nextPeakInfected,
       peakTick = nextPeakTick
     )
+
+    validatePartition(nextState, graph.nodeCount).map(_ => nextState)
 
   private def shouldStop(state: SimState, stopCondition: StopCondition): Boolean =
     state.tick >= stopCondition.maxTicks ||
@@ -172,11 +179,7 @@ object SimulationEngine:
     (0 until nodeCount).toVector.map: node =>
       if infected.contains(node) then NodeHealth.Infected
       else if recovered.contains(node) then NodeHealth.Recovered
-      else if susceptible.contains(node) then NodeHealth.Susceptible
-      else
-        throw IllegalStateException(
-          s"Node $node is not present in susceptible, infected, or recovered sets"
-        )
+      else NodeHealth.Susceptible
 
   private def initialNodeStates(
       collectNodeStates: Boolean,
@@ -206,3 +209,16 @@ object SimulationEngine:
     nodes.foldLeft(Set.empty[Int]): (acc, node) =>
       if rng.nextDouble() <= probability then acc + node
       else acc
+
+  private def validatePartition(state: SimState, nodeCount: Int): Either[String, Unit] =
+    val allNodes = (0 until nodeCount).toSet
+    val union = state.susceptible union state.infected union state.recovered
+    val infectedRecoveredOverlap = state.infected intersect state.recovered
+    val infectedSusceptibleOverlap = state.infected intersect state.susceptible
+    val recoveredSusceptibleOverlap = state.recovered intersect state.susceptible
+
+    if infectedRecoveredOverlap.nonEmpty then Left(s"invalid state partition at tick ${state.tick}: infected/recovered overlap")
+    else if infectedSusceptibleOverlap.nonEmpty then Left(s"invalid state partition at tick ${state.tick}: infected/susceptible overlap")
+    else if recoveredSusceptibleOverlap.nonEmpty then Left(s"invalid state partition at tick ${state.tick}: recovered/susceptible overlap")
+    else if union != allNodes then Left(s"invalid state partition at tick ${state.tick}: node coverage mismatch")
+    else Right(())

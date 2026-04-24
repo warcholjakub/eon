@@ -8,12 +8,21 @@ object BatchRunner:
         (0 until runs).toVector.foldLeft[Either[String, Vector[SimulationSummary]]](Right(Vector.empty)):
           case (accEither, runIndex) =>
             accEither.flatMap: acc =>
-              val runConfig = config.copy(seed = config.seed + runIndex.toLong)
+              val runConfig = configForRun(config, runIndex)
               SimulationEngine.run(runConfig).map(result => acc :+ result.summary)
 
       summariesEither.map: summaries =>
         val aggregate = aggregateMetrics(summaries)
         BatchResult(runs = runs, summaries = summaries, aggregate = aggregate)
+
+  private[core] def configForRun(config: SimulationConfig, runIndex: Int): SimulationConfig =
+    val runSeed = config.seed + runIndex.toLong
+    val runGraphSpec =
+      config.graphSpec match
+        case generated: GraphSpec.Generated => generated.copy(seed = runSeed)
+        case other                          => other
+
+    config.copy(seed = runSeed, graphSpec = runGraphSpec)
 
   private def aggregateMetrics(summaries: Vector[SimulationSummary]): AggregateMetrics =
     def average(values: Vector[Int]): Double =

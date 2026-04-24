@@ -147,3 +147,47 @@ class SimulationEngineSuite extends FunSuite:
     assertEquals(first.summary, second.summary)
     assertEquals(first.timeseries, second.timeseries)
     assertEquals(first.tickNodeStates, second.tickNodeStates)
+
+  test("BatchRunner configForRun updates simulation and generated graph seeds"):
+    val base = SimulationConfig(
+      infectionProbability = 0.2,
+      recoveryProbability = 0.1,
+      initialInfected = Set(0),
+      stopCondition = StopCondition(stopWhenNoInfected = true, maxTicks = 20),
+      seed = 100,
+      graphSpec = GraphSpec.Generated(
+        shape = GraphShape.ErdosRenyi,
+        nodeCount = 10,
+        edgeActivation = EdgeActivation(1, 0),
+        erdosProbability = 0.2,
+        ringDegree = 2,
+        seed = 7
+      ),
+      collectNodeStates = false
+    )
+
+    val run = BatchRunner.configForRun(base, runIndex = 3)
+
+    assertEquals(run.seed, 103L)
+    val generated = run.graphSpec.asInstanceOf[GraphSpec.Generated]
+    assertEquals(generated.seed, 103L)
+
+  test("BatchRunner configForRun keeps file graph spec while updating simulation seed"):
+    val base = SimulationConfig(
+      infectionProbability = 0.2,
+      recoveryProbability = 0.1,
+      initialInfected = Set(0),
+      stopCondition = StopCondition(stopWhenNoInfected = true, maxTicks = 20),
+      seed = 50,
+      graphSpec = GraphSpec.FromFile(
+        path = "data/graph.csv",
+        defaultActivation = EdgeActivation(1, 0),
+        explicitNodeCount = Some(5)
+      ),
+      collectNodeStates = false
+    )
+
+    val run = BatchRunner.configForRun(base, runIndex = 2)
+
+    assertEquals(run.seed, 52L)
+    assertEquals(run.graphSpec, base.graphSpec)
