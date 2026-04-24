@@ -81,7 +81,8 @@ object GraphBuilder:
           for
             source <- parseInt(a, s"invalid source node at line $lineNumber")
             target <- parseInt(b, s"invalid target node at line $lineNumber")
-          yield Some(Edge(source, target, defaultActivation))
+            edge <- buildEdge(source, target, defaultActivation, lineNumber)
+          yield Some(edge)
 
         case Vector(a, b, onTicks, offTicks, phase) =>
           for
@@ -90,12 +91,32 @@ object GraphBuilder:
             on <- parseInt(onTicks, s"invalid onTicks at line $lineNumber")
             off <- parseInt(offTicks, s"invalid offTicks at line $lineNumber")
             parsedPhase <- parseInt(phase, s"invalid phase at line $lineNumber")
-          yield Some(Edge(source, target, EdgeActivation(on, off, parsedPhase)))
+            activation <- buildActivation(on, off, parsedPhase, lineNumber)
+            edge <- buildEdge(source, target, activation, lineNumber)
+          yield Some(edge)
 
         case _ => Left(s"invalid edge format at line $lineNumber")
 
   private def parseInt(raw: String, error: String): Either[String, Int] =
     raw.toIntOption.toRight(error)
+
+  private def buildActivation(
+      onTicks: Int,
+      offTicks: Int,
+      phase: Int,
+      lineNumber: Int
+  ): Either[String, EdgeActivation] =
+    scala.util.Try(EdgeActivation(onTicks, offTicks, phase)).toEither.left.map: error =>
+      s"invalid edge activation at line $lineNumber: ${error.getMessage}"
+
+  private def buildEdge(
+      source: Int,
+      target: Int,
+      activation: EdgeActivation,
+      lineNumber: Int
+  ): Either[String, Edge] =
+    scala.util.Try(Edge(source, target, activation)).toEither.left.map: error =>
+      s"invalid edge at line $lineNumber: ${error.getMessage}"
 
   private def randomizeActivation(base: EdgeActivation, rng: Random): EdgeActivation =
     val cycle = base.onTicks + base.offTicks

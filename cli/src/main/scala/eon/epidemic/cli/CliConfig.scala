@@ -152,8 +152,8 @@ object ConfigFileLoader:
             phase = overrides.activationPhase.getOrElse(baseWithPreset.activation.phase)
           )
 
-        activationEither.map: activation =>
-          baseWithPreset.copy(
+        activationEither.flatMap: activation =>
+          val merged = baseWithPreset.copy(
             preset = effectivePreset,
             graphSource = overrides.graphSource.getOrElse(baseWithPreset.graphSource),
             graphShape = shape,
@@ -175,6 +175,11 @@ object ConfigFileLoader:
             visualizationEnabled =
               overrides.visualizationEnabled.getOrElse(baseWithPreset.visualizationEnabled)
           )
+          validateSettings(merged)
+
+  private def validateSettings(settings: CliSettings): Either[String, CliSettings] =
+    if settings.runs < 1 then Left("runs must be >= 1")
+    else Right(settings)
 
   private def buildActivation(onTicks: Int, offTicks: Int, phase: Int): Either[String, EdgeActivation] =
     Try(EdgeActivation(onTicks = onTicks, offTicks = offTicks, phase = phase)).toEither.left.map:
@@ -220,33 +225,34 @@ object ConfigFileLoader:
   private def loadHocon(path: String): Either[String, CliOverrides] =
     Try(ConfigFactory.parseFile(File(path)).resolve()).toEither.left.map: error =>
       s"failed to parse HOCON config: ${error.getMessage}"
-    .map: config =>
-      CliOverrides(
-        preset = getString(config, "preset"),
-        graphSource = getString(config, "graph.source", "graphSource"),
-        graphShape = getString(config, "graph.shape", "graphShape"),
-        graphFile = getString(config, "graph.file", "graphFile"),
-        explicitNodeCount = getInt(config, "graph.explicit-node-count", "graph.explicitNodeCount"),
-        nodeCount = getInt(config, "graph.node-count", "graph.nodeCount", "nodeCount"),
-        edgeProbability = getDouble(config, "graph.edge-probability", "graph.edgeProbability", "edgeProbability"),
-        ringDegree = getInt(config, "graph.ring-degree", "graph.ringDegree", "ringDegree"),
-        activationOnTicks = getInt(config, "graph.activation.on-ticks", "graph.activation.onTicks", "activationOnTicks"),
-        activationOffTicks = getInt(config, "graph.activation.off-ticks", "graph.activation.offTicks", "activationOffTicks"),
-        activationPhase = getInt(config, "graph.activation.phase", "activationPhase"),
-        infectionProbability = getDouble(config, "simulation.infection-probability", "simulation.infectionProbability", "infectionProbability"),
-        recoveryProbability = getDouble(config, "simulation.recovery-probability", "simulation.recoveryProbability", "recoveryProbability"),
-        maxTicks = getInt(config, "simulation.max-ticks", "simulation.maxTicks", "maxTicks"),
-        stopWhenNoInfected = getBoolean(config, "simulation.stop-when-no-infected", "simulation.stopWhenNoInfected", "stopWhenNoInfected"),
-        initialInfected = getInitialInfected(config),
-        initialInfectedCount = getInt(config, "simulation.initial-infected-count", "simulation.initialInfectedCount", "initialInfectedCount"),
-        seed = getLong(config, "simulation.seed", "seed"),
-        runs = getInt(config, "simulation.runs", "runs"),
-        outputDir = getString(config, "output.dir", "outputDir"),
-        visualizationEnabled = getBoolean(config, "output.visualization", "visualizationEnabled")
-      )
+    .flatMap: config =>
+      getInitialInfected(config).map: initialInfected =>
+        CliOverrides(
+          preset = getString(config, "preset"),
+          graphSource = getString(config, "graph.source", "graphSource"),
+          graphShape = getString(config, "graph.shape", "graphShape"),
+          graphFile = getString(config, "graph.file", "graphFile"),
+          explicitNodeCount = getInt(config, "graph.explicit-node-count", "graph.explicitNodeCount"),
+          nodeCount = getInt(config, "graph.node-count", "graph.nodeCount", "nodeCount"),
+          edgeProbability = getDouble(config, "graph.edge-probability", "graph.edgeProbability", "edgeProbability"),
+          ringDegree = getInt(config, "graph.ring-degree", "graph.ringDegree", "ringDegree"),
+          activationOnTicks = getInt(config, "graph.activation.on-ticks", "graph.activation.onTicks", "activationOnTicks"),
+          activationOffTicks = getInt(config, "graph.activation.off-ticks", "graph.activation.offTicks", "activationOffTicks"),
+          activationPhase = getInt(config, "graph.activation.phase", "activationPhase"),
+          infectionProbability = getDouble(config, "simulation.infection-probability", "simulation.infectionProbability", "infectionProbability"),
+          recoveryProbability = getDouble(config, "simulation.recovery-probability", "simulation.recoveryProbability", "recoveryProbability"),
+          maxTicks = getInt(config, "simulation.max-ticks", "simulation.maxTicks", "maxTicks"),
+          stopWhenNoInfected = getBoolean(config, "simulation.stop-when-no-infected", "simulation.stopWhenNoInfected", "stopWhenNoInfected"),
+          initialInfected = initialInfected,
+          initialInfectedCount = getInt(config, "simulation.initial-infected-count", "simulation.initialInfectedCount", "initialInfectedCount"),
+          seed = getLong(config, "simulation.seed", "seed"),
+          runs = getInt(config, "simulation.runs", "runs"),
+          outputDir = getString(config, "output.dir", "outputDir"),
+          visualizationEnabled = getBoolean(config, "output.visualization", "visualizationEnabled")
+        )
 
   private def getString(config: Config, paths: String*): Option[String] =
-    paths.find(config.hasPath).map(config.getString)
+    paths.find(config.hasPath).flatMap(path => Try(config.getString(path)).toOption)
 
   private def getInt(config: Config, paths: String*): Option[Int] =
     paths.find(config.hasPath).flatMap(path => Try(config.getInt(path)).toOption)
@@ -260,14 +266,24 @@ object ConfigFileLoader:
   private def getBoolean(config: Config, paths: String*): Option[Boolean] =
     paths.find(config.hasPath).flatMap(path => Try(config.getBoolean(path)).toOption)
 
-  private def getInitialInfected(config: Config): Option[String] =
+  private def getInitialInfected(config: Config): Either[String, Option[String]] =
     val candidates = Vector("simulation.initial-infected", "simulation.initialInfected", "initialInfected")
-    candidates.find(config.hasPath).flatMap: path =>
-      val valueType = config.getValue(path).valueType()
-      if valueType == ConfigValueType.LIST then
-        val values = config.getIntList(path).asScala.toVector
-        if values.isEmpty then None else Some(values.mkString(","))
-      else getString(config, path)
+    candidates.find(config.hasPath) match
+      case None => Right(None)
+      case Some(path) =>
+        val valueType = config.getValue(path).valueType()
+        if valueType == ConfigValueType.LIST then
+          Try(config.getIntList(path).asScala.toVector)
+            .toEither
+            .left
+            .map(error => s"invalid simulation.initial-infected list at '$path': ${error.getMessage}")
+            .map(values => if values.isEmpty then None else Some(values.mkString(",")))
+        else
+          Try(config.getString(path))
+            .toEither
+            .left
+            .map(error => s"invalid simulation.initial-infected value at '$path': ${error.getMessage}")
+            .map(value => Option(value).map(_.trim).filter(_.nonEmpty))
 
   private def parseGraphShape(raw: String): Either[String, GraphShape] =
     raw.toLowerCase match

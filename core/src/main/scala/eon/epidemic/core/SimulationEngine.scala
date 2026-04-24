@@ -95,8 +95,18 @@ object SimulationEngine:
               neighbor
         .toSet
 
-    val newInfected = infectionCandidates.filter(_ => rng.nextDouble() <= config.infectionProbability)
-    val newRecovered = state.infected.filter(_ => rng.nextDouble() <= config.recoveryProbability)
+    val newInfected =
+      sampleNodes(
+        nodes = infectionCandidates.toVector.sorted,
+        probability = config.infectionProbability,
+        rng = rng
+      )
+    val newRecovered =
+      sampleNodes(
+        nodes = state.infected.toVector.sorted,
+        probability = config.recoveryProbability,
+        rng = rng
+      )
 
     val nextInfected = (state.infected -- newRecovered) ++ newInfected
     val nextRecovered = state.recovered ++ newRecovered
@@ -191,3 +201,8 @@ object SimulationEngine:
         )
       )
     else None
+
+  private def sampleNodes(nodes: Vector[Int], probability: Double, rng: Random): Set[Int] =
+    nodes.foldLeft(Set.empty[Int]): (acc, node) =>
+      if rng.nextDouble() <= probability then acc + node
+      else acc

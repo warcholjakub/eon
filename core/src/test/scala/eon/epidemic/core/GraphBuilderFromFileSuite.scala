@@ -109,13 +109,29 @@ class GraphBuilderFromFileSuite extends FunSuite:
 
     assertEquals(error, "invalid phase at line 1")
 
-  test("from-file currently throws when activation on+off is zero"):
+  test("from-file rejects invalid edge activation instead of throwing"):
     val path = writeTemp("0,1,0,0,0\n")
 
     val spec = GraphSpec.FromFile(path.toString, defaultActivation, explicitNodeCount = None)
+    val error = GraphBuilder.build(spec).swap.toOption.get
 
-    intercept[IllegalArgumentException]:
-      GraphBuilder.build(spec)
+    assert(error.startsWith("invalid edge activation at line 1:"))
+
+  test("from-file rejects negative endpoint instead of throwing"):
+    val path = writeTemp("-1,2\n")
+
+    val spec = GraphSpec.FromFile(path.toString, defaultActivation, explicitNodeCount = None)
+    val error = GraphBuilder.build(spec).swap.toOption.get
+
+    assert(error.startsWith("invalid edge at line 1:"))
+
+  test("from-file rejects self-loop instead of throwing"):
+    val path = writeTemp("3,3\n")
+
+    val spec = GraphSpec.FromFile(path.toString, defaultActivation, explicitNodeCount = None)
+    val error = GraphBuilder.build(spec).swap.toOption.get
+
+    assert(error.startsWith("invalid edge at line 1:"))
 
   private def writeTemp(content: String): Path =
     val file = Files.createTempFile("graph-builder-from-file", ".csv")

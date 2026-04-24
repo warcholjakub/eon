@@ -46,6 +46,20 @@ class CliParserSuite extends FunSuite:
     val parsed = CliParser.parse(Array("--config-file", file.toString)).toOption.get
     assertEquals(parsed.visualizationEnabled, false)
 
+  test("malformed initial-infected list in hocon returns clear error"):
+    val file = Files.createTempFile("epidemic-initial-infected", ".conf")
+    Files.writeString(
+      file,
+      """simulation {
+        |  initial-infected = [0, "oops", 2]
+        |}
+        |""".stripMargin
+    )
+
+    val result = CliParser.parse(Array("--config-file", file.toString))
+    assert(result.isLeft)
+    assert(result.swap.toOption.get.contains("invalid simulation.initial-infected list"))
+
   test("config preset is not reapplied during cli merge"):
     val file = Files.createTempFile("epidemic-preset", ".conf")
     Files.writeString(
@@ -92,3 +106,20 @@ class CliParserSuite extends FunSuite:
 
     assertEquals(parsed.nodeCount, 40)
     assertEquals(parsed.runs, 2)
+
+  test("rejects runs <= 0 from hocon config"):
+    val file = Files.createTempFile("epidemic-runs-invalid", ".conf")
+    Files.writeString(
+      file,
+      """simulation {
+        |  runs = 0
+        |}
+        |""".stripMargin
+    )
+
+    val result = CliParser.parse(Array("--config-file", file.toString))
+    assertEquals(result, Left("runs must be >= 1"))
+
+  test("rejects runs <= 0 from cli arguments"):
+    val result = CliParser.parse(Array("--runs", "0"))
+    assertEquals(result, Left("runs must be >= 1"))

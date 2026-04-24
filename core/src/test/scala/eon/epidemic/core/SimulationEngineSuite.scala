@@ -111,3 +111,39 @@ class SimulationEngineSuite extends FunSuite:
     val withStates =
       SimulationEngine.runWithGraph(baseConfig.copy(collectNodeStates = true), graph).toOption.get
     assert(withStates.tickNodeStates.exists(_.nonEmpty))
+
+  test("same seed yields identical simulation result"):
+    val graph = Graph.fromEdges(
+      nodeCount = 6,
+      rawEdges = Vector(
+        Edge(0, 1, EdgeActivation(1, 0)),
+        Edge(1, 2, EdgeActivation(1, 0)),
+        Edge(2, 3, EdgeActivation(1, 0)),
+        Edge(3, 4, EdgeActivation(1, 0)),
+        Edge(4, 5, EdgeActivation(1, 0))
+      )
+    ).toOption.get
+
+    val config = SimulationConfig(
+      infectionProbability = 0.45,
+      recoveryProbability = 0.25,
+      initialInfected = Set(0, 2),
+      stopCondition = StopCondition(stopWhenNoInfected = true, maxTicks = 30),
+      seed = 777,
+      graphSpec = GraphSpec.Generated(
+        shape = GraphShape.ErdosRenyi,
+        nodeCount = 6,
+        edgeActivation = EdgeActivation(1, 0),
+        erdosProbability = 0.0,
+        ringDegree = 2,
+        seed = 777
+      ),
+      collectNodeStates = true
+    )
+
+    val first = SimulationEngine.runWithGraph(config, graph).toOption.get
+    val second = SimulationEngine.runWithGraph(config, graph).toOption.get
+
+    assertEquals(first.summary, second.summary)
+    assertEquals(first.timeseries, second.timeseries)
+    assertEquals(first.tickNodeStates, second.tickNodeStates)
