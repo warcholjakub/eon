@@ -123,3 +123,7 @@ class CliParserSuite extends FunSuite:
   test("rejects runs <= 0 from cli arguments"):
     val result = CliParser.parse(Array("--runs", "0"))
     assertEquals(result, Left("runs must be >= 1"))
+
+  test("supports switching disease model to sis"):
+    val result = CliParser.parse(Array("--model", "sis")).toOption.get
+    assertEquals(result.diseaseModel, eon.epidemic.core.DiseaseModel.SIS)

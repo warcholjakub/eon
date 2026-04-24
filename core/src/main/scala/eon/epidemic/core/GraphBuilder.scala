@@ -16,6 +16,8 @@ object GraphBuilder:
       spec.shape match
         case GraphShape.ErdosRenyi => buildErdosRenyi(spec)
         case GraphShape.Ring       => buildRing(spec)
+        case GraphShape.ClusteredVpn =>
+          buildClusteredVpn(spec)
 
   private def buildErdosRenyi(spec: GraphSpec.Generated): Either[String, Graph] =
     if spec.erdosProbability < 0.0 || spec.erdosProbability > 1.0 then
@@ -45,6 +47,37 @@ object GraphBuilder:
             Edge(node, target, randomizeActivation(spec.edgeActivation, rng)).normalized
 
       Graph.fromEdges(spec.nodeCount, edges.distinct)
+
+  private def buildClusteredVpn(spec: GraphSpec.Generated): Either[String, Graph] =
+    if spec.erdosProbability < 0.0 || spec.erdosProbability > 1.0 then
+      Left("erdosProbability must be in [0.0, 1.0]")
+    else if spec.nodeCount < 4 then
+      Left("nodeCount must be >= 4 for clustered-vpn graph")
+    else
+      val leftCluster = (0 until (spec.nodeCount / 2)).toVector
+      val rightCluster = ((spec.nodeCount / 2) until spec.nodeCount).toVector
+      val maxVpnLinks = Math.min(leftCluster.size, rightCluster.size)
+      val vpnLinks = Math.max(1, spec.ringDegree)
+
+      if vpnLinks > maxVpnLinks then
+        Left(s"ringDegree (vpn links) must be <= $maxVpnLinks for clustered-vpn graph")
+      else
+        val rng = Random(spec.seed)
+
+        def clusterEdges(nodes: Vector[Int]): Vector[Edge] =
+          nodes.indices.toVector.flatMap: i =>
+            ((i + 1) until nodes.size).toVector.collect:
+              case j if rng.nextDouble() <= spec.erdosProbability =>
+                Edge(nodes(i), nodes(j), randomizeActivation(spec.edgeActivation, rng))
+
+        val shuffledLeft = rng.shuffle(leftCluster)
+        val shuffledRight = rng.shuffle(rightCluster)
+        val vpnEdges =
+          (0 until vpnLinks).toVector.map: idx =>
+            Edge(shuffledLeft(idx), shuffledRight(idx), randomizeActivation(spec.edgeActivation, rng))
+
+        val edges = (clusterEdges(leftCluster) ++ clusterEdges(rightCluster) ++ vpnEdges).map(_.normalized)
+        Graph.fromEdges(spec.nodeCount, edges.distinct)
 
   private def buildFromFile(spec: GraphSpec.FromFile): Either[String, Graph] =
     val loaded =
