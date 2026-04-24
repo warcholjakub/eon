@@ -33,6 +33,19 @@ class CliParserSuite extends FunSuite:
     assertEquals(parsed.initialInfected, "0,1")
     assertEquals(parsed.runs, 3)
 
+  test("visualization flag can be disabled from hocon"):
+    val file = Files.createTempFile("epidemic-visualization", ".conf")
+    Files.writeString(
+      file,
+      """output {
+        |  visualization = false
+        |}
+        |""".stripMargin
+    )
+
+    val parsed = CliParser.parse(Array("--config-file", file.toString)).toOption.get
+    assertEquals(parsed.visualizationEnabled, false)
+
   test("config preset is not reapplied during cli merge"):
     val file = Files.createTempFile("epidemic-preset", ".conf")
     Files.writeString(

@@ -11,14 +11,19 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 object OutputWriter:
-  def writeSingle(outputDir: String, result: SimulationResult): Either[String, Unit] =
+  def writeSingle(
+      outputDir: String,
+      result: SimulationResult,
+      writeVisualization: Boolean
+  ): Either[String, Unit] =
     withOutputDir(outputDir): dir =>
       val summaryPath = dir.resolve("summary.json")
       val timeseriesPath = dir.resolve("timeseries.csv")
       val visualizationPath = dir.resolve("visualization.html")
       Files.writeString(summaryPath, renderSummaryJson(result.summary))
       Files.writeString(timeseriesPath, renderTimeseriesCsv(result.timeseries))
-      Files.writeString(visualizationPath, renderVisualizationHtml(result))
+      if writeVisualization then
+        renderVisualizationHtml(result).foreach(html => Files.writeString(visualizationPath, html))
 
   def writeBatch(outputDir: String, result: BatchResult): Either[String, Unit] =
     withOutputDir(outputDir): dir =>
@@ -81,7 +86,7 @@ object OutputWriter:
 
     (header +: rows).mkString("\n") + "\n"
 
-  private def renderVisualizationHtml(result: SimulationResult): String =
+  private def renderVisualizationHtml(result: SimulationResult): Option[String] =
     val seriesJson =
       result.timeseries
         .map(snapshot =>
@@ -96,13 +101,14 @@ object OutputWriter:
         )
         .mkString("[", ",", "]")
 
-    val statesJson =
-      result.tickNodeStates
-        .map(encodeTickStates)
-        .map(encoded => s"\"$encoded\"")
-        .mkString("[", ",", "]")
+    result.tickNodeStates.map: nodeStates =>
+      val statesJson =
+        nodeStates
+          .map(encodeTickStates)
+          .map(encoded => s"\"$encoded\"")
+          .mkString("[", ",", "]")
 
-    s"""<!doctype html>
+      s"""<!doctype html>
        |<html lang="en">
        |<head>
        |  <meta charset="utf-8" />
@@ -300,7 +306,7 @@ object OutputWriter:
        |    let timer = null;
        |
        |    const render = () => {
-       |      tickLabel.textContent = `tick: $${currentTick}`;
+       |      tickLabel.textContent = `tick: ${'$'}{currentTick}`;
        |      tickRange.value = currentTick;
        |      renderGraph(currentTick);
        |      renderSirChart(currentTick);

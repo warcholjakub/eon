@@ -31,7 +31,10 @@ object CliParser:
         opt[Int]("initial-infected-count").action((value, state) => state.copy(initialInfectedCount = Some(value))),
         opt[Long]("seed").action((value, state) => state.copy(seed = Some(value))),
         opt[Int]("runs").action((value, state) => state.copy(runs = Some(value))),
-        opt[String]("output-dir").action((value, state) => state.copy(outputDir = Some(value)))
+        opt[String]("output-dir").action((value, state) => state.copy(outputDir = Some(value))),
+        opt[Boolean]("visualization").action((value, state) =>
+          state.copy(visualizationEnabled = Some(value))
+        )
       )
 
     OParser.parse(parser, args, CliOverrides()) match

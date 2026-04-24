@@ -26,7 +26,15 @@ object Main:
 
   private def execute(config: SimulationConfig, settings: CliSettings): Either[String, Unit] =
     if settings.runs <= 1 then
-      SimulationEngine.run(config).flatMap(result => OutputWriter.writeSingle(settings.outputDir, result))
+      SimulationEngine
+        .run(config)
+        .flatMap(result =>
+          OutputWriter.writeSingle(
+            outputDir = settings.outputDir,
+            result = result,
+            writeVisualization = settings.visualizationEnabled
+          )
+        )
     else
       BatchRunner.run(config, settings.runs).flatMap(result => OutputWriter.writeBatch(settings.outputDir, result))
 
@@ -68,7 +76,8 @@ object Main:
             maxTicks = settings.maxTicks
           ),
           seed = settings.seed,
-          graphSpec = graphSpec
+          graphSpec = graphSpec,
+          collectNodeStates = settings.visualizationEnabled && settings.runs <= 1
         )
 
   private def initialInfected(settings: CliSettings): Either[String, Set[Int]] =
@@ -101,11 +110,11 @@ object Main:
     else if count > nodeCount then Left("initial-infected-count cannot exceed node count")
     else
       val rng = Random(seed + 999)
-      val sampled =
-        Iterator.continually(rng.nextInt(nodeCount)).take(nodeCount * 8).foldLeft(Set.empty[Int]):
-          (acc, node) => if acc.size >= count then acc else acc + node
+      val nodes = Array.tabulate(nodeCount)(identity)
+      for i <- 0 until count do
+        val j = i + rng.nextInt(nodeCount - i)
+        val tmp = nodes(i)
+        nodes(i) = nodes(j)
+        nodes(j) = tmp
 
-      if sampled.size == count then Right(sampled)
-      else
-        val fallback = (0 until nodeCount).toSet.take(count)
-        Right(fallback)
+      Right(nodes.take(count).toSet)

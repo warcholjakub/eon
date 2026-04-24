@@ -86,7 +86,8 @@ final case class SimulationConfig(
     initialInfected: Set[Int],
     stopCondition: StopCondition,
     seed: Long,
-    graphSpec: GraphSpec
+    graphSpec: GraphSpec,
+    collectNodeStates: Boolean
 )
 
 final case class TickSnapshot(
@@ -119,7 +120,7 @@ final case class SimulationSummary(
 final case class SimulationResult(
     summary: SimulationSummary,
     timeseries: Vector[TickSnapshot],
-    tickNodeStates: Vector[TickNodeStates],
+    tickNodeStates: Option[Vector[TickNodeStates]],
     graph: Graph
 )
 

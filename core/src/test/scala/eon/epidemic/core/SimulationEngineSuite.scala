@@ -30,7 +30,8 @@ class SimulationEngineSuite extends FunSuite:
         erdosProbability = 0.0,
         ringDegree = 1,
         seed = 123
-      )
+      ),
+      collectNodeStates = false
     )
 
     val result = SimulationEngine.runWithGraph(config, graph).toOption.get
@@ -56,7 +57,8 @@ class SimulationEngineSuite extends FunSuite:
         erdosProbability = 0.0,
         ringDegree = 0,
         seed = 1
-      )
+      ),
+      collectNodeStates = false
     )
 
     val result = SimulationEngine.runWithGraph(config, graph).toOption.get
@@ -76,9 +78,36 @@ class SimulationEngineSuite extends FunSuite:
         erdosProbability = 0.1,
         ringDegree = 2,
         seed = 42
-      )
+      ),
+      collectNodeStates = false
     )
 
     val result = BatchRunner.run(config, runs = 4).toOption.get
     assertEquals(result.runs, 4)
     assertEquals(result.summaries.size, 4)
+
+  test("node state collection is optional"):
+    val graph = Graph.fromEdges(nodeCount = 2, rawEdges = Vector.empty).toOption.get
+    val baseConfig = SimulationConfig(
+      infectionProbability = 0.0,
+      recoveryProbability = 1.0,
+      initialInfected = Set(0),
+      stopCondition = StopCondition(stopWhenNoInfected = true, maxTicks = 3),
+      seed = 1,
+      graphSpec = GraphSpec.Generated(
+        shape = GraphShape.ErdosRenyi,
+        nodeCount = 2,
+        edgeActivation = EdgeActivation(1, 0),
+        erdosProbability = 0.0,
+        ringDegree = 0,
+        seed = 1
+      ),
+      collectNodeStates = false
+    )
+
+    val withoutStates = SimulationEngine.runWithGraph(baseConfig, graph).toOption.get
+    assertEquals(withoutStates.tickNodeStates, None)
+
+    val withStates =
+      SimulationEngine.runWithGraph(baseConfig.copy(collectNodeStates = true), graph).toOption.get
+    assert(withStates.tickNodeStates.exists(_.nonEmpty))

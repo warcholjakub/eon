@@ -30,7 +30,8 @@ final case class CliSettings(
     initialInfectedCount: Option[Int],
     seed: Long,
     runs: Int,
-    outputDir: String
+    outputDir: String,
+    visualizationEnabled: Boolean
 )
 
 object CliSettings:
@@ -53,7 +54,8 @@ object CliSettings:
       initialInfectedCount = None,
       seed = 42L,
       runs = 1,
-      outputDir = "out"
+      outputDir = "out",
+      visualizationEnabled = true
     )
 
 object ScenarioPresets:
@@ -119,7 +121,8 @@ final case class CliOverrides(
     initialInfectedCount: Option[Int] = None,
     seed: Option[Long] = None,
     runs: Option[Int] = None,
-    outputDir: Option[String] = None
+    outputDir: Option[String] = None,
+    visualizationEnabled: Option[Boolean] = None
 )
 
 object ConfigFileLoader:
@@ -168,7 +171,9 @@ object ConfigFileLoader:
             initialInfectedCount = overrides.initialInfectedCount.orElse(baseWithPreset.initialInfectedCount),
             seed = overrides.seed.getOrElse(baseWithPreset.seed),
             runs = overrides.runs.getOrElse(baseWithPreset.runs),
-            outputDir = overrides.outputDir.getOrElse(baseWithPreset.outputDir)
+            outputDir = overrides.outputDir.getOrElse(baseWithPreset.outputDir),
+            visualizationEnabled =
+              overrides.visualizationEnabled.getOrElse(baseWithPreset.visualizationEnabled)
           )
 
   private def buildActivation(onTicks: Int, offTicks: Int, phase: Int): Either[String, EdgeActivation] =
@@ -208,7 +213,8 @@ object ConfigFileLoader:
         initialInfectedCount = map.get("initialInfectedCount").flatMap(_.toIntOption),
         seed = map.get("seed").flatMap(_.toLongOption),
         runs = map.get("runs").flatMap(_.toIntOption),
-        outputDir = map.get("outputDir")
+        outputDir = map.get("outputDir"),
+        visualizationEnabled = map.get("visualizationEnabled").flatMap(_.toBooleanOption)
       )
 
   private def loadHocon(path: String): Either[String, CliOverrides] =
@@ -235,7 +241,8 @@ object ConfigFileLoader:
         initialInfectedCount = getInt(config, "simulation.initial-infected-count", "simulation.initialInfectedCount", "initialInfectedCount"),
         seed = getLong(config, "simulation.seed", "seed"),
         runs = getInt(config, "simulation.runs", "runs"),
-        outputDir = getString(config, "output.dir", "outputDir")
+        outputDir = getString(config, "output.dir", "outputDir"),
+        visualizationEnabled = getBoolean(config, "output.visualization", "visualizationEnabled")
       )
 
   private def getString(config: Config, paths: String*): Option[String] =

@@ -28,18 +28,14 @@ object SimulationEngine:
         recovered = initialRecovered,
         everInfected = initialInfected,
         timeseries = Vector(initialSnapshot),
-        tickNodeStates = Vector(
-          TickNodeStates(
-            tick = 0,
-            nodeStates =
-              buildNodeStates(
-                nodeCount = graph.nodeCount,
-                susceptible = initialSusceptible,
-                infected = initialInfected,
-                recovered = initialRecovered
-              )
-          )
-        ),
+        tickNodeStates =
+          initialNodeStates(
+            collectNodeStates = config.collectNodeStates,
+            nodeCount = graph.nodeCount,
+            susceptible = initialSusceptible,
+            infected = initialInfected,
+            recovered = initialRecovered
+          ),
         peakInfected = initialInfected.size,
         peakTick = 0
       )
@@ -69,7 +65,7 @@ object SimulationEngine:
       recovered: Set[Int],
       everInfected: Set[Int],
       timeseries: Vector[TickSnapshot],
-      tickNodeStates: Vector[TickNodeStates],
+      tickNodeStates: Option[Vector[TickNodeStates]],
       peakInfected: Int,
       peakTick: Int
   )
@@ -119,6 +115,19 @@ object SimulationEngine:
       if nextInfected.size > state.peakInfected then (nextInfected.size, nextTick)
       else (state.peakInfected, state.peakTick)
 
+    val nextTickNodeStates =
+      state.tickNodeStates.map: states =>
+        states :+ TickNodeStates(
+          tick = nextTick,
+          nodeStates =
+            buildNodeStates(
+              nodeCount = graph.nodeCount,
+              susceptible = nextSusceptible,
+              infected = nextInfected,
+              recovered = nextRecovered
+            )
+        )
+
     state.copy(
       tick = nextTick,
       susceptible = nextSusceptible,
@@ -126,16 +135,7 @@ object SimulationEngine:
       recovered = nextRecovered,
       everInfected = nextEverInfected,
       timeseries = state.timeseries :+ nextSnapshot,
-      tickNodeStates = state.tickNodeStates :+ TickNodeStates(
-        tick = nextTick,
-        nodeStates =
-          buildNodeStates(
-            nodeCount = graph.nodeCount,
-            susceptible = nextSusceptible,
-            infected = nextInfected,
-            recovered = nextRecovered
-          )
-      ),
+      tickNodeStates = nextTickNodeStates,
       peakInfected = nextPeakInfected,
       peakTick = nextPeakTick
     )
@@ -162,6 +162,32 @@ object SimulationEngine:
     (0 until nodeCount).toVector.map: node =>
       if infected.contains(node) then NodeHealth.Infected
       else if recovered.contains(node) then NodeHealth.Recovered
+      else if susceptible.contains(node) then NodeHealth.Susceptible
       else
-        if susceptible.contains(node) then NodeHealth.Susceptible
-        else NodeHealth.Susceptible
+        throw IllegalStateException(
+          s"Node $node is not present in susceptible, infected, or recovered sets"
+        )
+
+  private def initialNodeStates(
+      collectNodeStates: Boolean,
+      nodeCount: Int,
+      susceptible: Set[Int],
+      infected: Set[Int],
+      recovered: Set[Int]
+  ): Option[Vector[TickNodeStates]] =
+    if collectNodeStates then
+      Some(
+        Vector(
+          TickNodeStates(
+            tick = 0,
+            nodeStates =
+              buildNodeStates(
+                nodeCount = nodeCount,
+                susceptible = susceptible,
+                infected = infected,
+                recovered = recovered
+              )
+          )
+        )
+      )
+    else None
