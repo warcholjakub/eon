@@ -9,3 +9,8 @@
     <img src="https://img.shields.io/github/last-commit/warcholjakub/eon?color=orange" alt="Last Commit" />
   </p>
 </div>
+<h5 align="center">
+Scala-based epidemic simulation on a graph with SIR dynamics.
+</h5>
+
+> ⚠️ **Highly experimental and under active development.** Expect breaking changes, rough edges, and the occasional missing feature.
