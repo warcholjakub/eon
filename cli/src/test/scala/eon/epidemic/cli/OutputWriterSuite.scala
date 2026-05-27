@@ -1,6 +1,5 @@
 package eon.epidemic.cli
 
-import eon.epidemic.core.AggregateMetrics
 import eon.epidemic.core.Edge
 import eon.epidemic.core.EdgeActivation
 import eon.epidemic.core.Graph
@@ -51,24 +50,54 @@ class OutputWriterSuite extends FunSuite:
     assertEquals(write, Right(()))
     assert(Files.exists(outputDir.resolve("visualization.html")))
 
-  test("writeSweep writes one CSV row per parameter pair"):
+  test("writeSweep writes one raw CSV row per simulation run"):
     val outputDir = Files.createTempDirectory("eon-output-writer-sweep")
-    val aggregate = AggregateMetrics(1, 2, 1.5, 1, 3, 2.0, 1, 2, 1.5)
+    Files.writeString(outputDir.resolve("sweep_summary.csv"), "obsolete")
+    val summaries = Vector(
+      SimulationSummary(1, 1, 1, 0, 1, 0, 1, Map(0 -> 0), Some(true)),
+      SimulationSummary(2, 2, 2, 1, 0, 0, 2, Map.empty, Some(false))
+    )
     val result =
       ParameterSweepResult(
-        runsPerPair = 1000,
+        runsPerPair = 2,
         rows = Vector(
-          ParameterSweepRow(0.05, 0.05, aggregate),
-          ParameterSweepRow(0.05, 0.1, aggregate)
-        )
+          ParameterSweepRow(0.05, 0.05, EdgeActivation(1, 0), summaries),
+          ParameterSweepRow(0.05, 0.1, EdgeActivation(1, 3), summaries)
+        ),
+        trackedNodes = Set(0)
       )
 
     val write = OutputWriter.writeSweep(outputDir.toString, result)
-    val output = Files.readString(outputDir.resolve("sweep_summary.csv"))
+    val output = Files.readString(outputDir.resolve("sweep_runs.csv"))
+    val lines = output.linesIterator.toVector
 
     assertEquals(write, Right(()))
-    assert(output.contains("infectionProbability,recoveryProbability,runs"))
-    assert(output.contains("0.05,0.1,1000"))
+    assertEquals(
+      lines.head,
+      "infectionProbability,recoveryProbability,activationOnTicks,activationOffTicks,activationPhase,activationActiveFraction,run,totalEverInfected,epidemicDurationTicks,peakInfected,peakTick,finalSusceptible,finalInfected,finalRecovered,containedToInitialGroups,node0FirstInfectionTick"
+    )
+    assertEquals(lines.size, 5)
+    assert(lines.contains("0.05,0.1,1,3,0,0.25,2,2,2,2,1,0,0,2,false,"))
+    assert(!Files.exists(outputDir.resolve("sweep_summary.csv")))
+
+  test("streamed sweep output appends raw rows beneath one header"):
+    val outputDir = Files.createTempDirectory("eon-output-writer-streamed-sweep")
+    val summary = SimulationSummary(1, 1, 1, 0, 1, 0, 1)
+    val first = ParameterSweepRow(0.05, 0.05, EdgeActivation(1, 0), Vector(summary))
+    val second = ParameterSweepRow(0.05, 0.1, EdgeActivation(1, 1), Vector(summary))
+
+    val written =
+      for
+        _ <- OutputWriter.initializeSweep(outputDir.toString, Set.empty, includeContainment = false)
+        _ <- OutputWriter.appendSweepRow(outputDir.toString, first, Set.empty, includeContainment = false)
+        _ <- OutputWriter.appendSweepRow(outputDir.toString, second, Set.empty, includeContainment = false)
+      yield ()
+
+    val lines = Files.readString(outputDir.resolve("sweep_runs.csv")).linesIterator.toVector
+
+    assertEquals(written, Right(()))
+    assertEquals(lines.size, 3)
+    assertEquals(lines.count(_.startsWith("infectionProbability")), 1)
 
   private def sampleResult(tickNodeStates: Option[Vector[TickNodeStates]]): SimulationResult =
     val graph = Graph.fromEdges(2, Vector(Edge(0, 1, EdgeActivation(1, 0)))).toOption.get

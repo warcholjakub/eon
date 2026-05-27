@@ -38,7 +38,7 @@ final case class CliSettings(
     sweepMinProbability: Double,
     sweepMaxProbability: Double,
     sweepProbabilityStep: Double,
-    recoveryOverrides: Map[Int, Double] = Map.empty
+    sweepEdgeActivations: Vector[EdgeActivation]
 )
 
 object CliSettings:
@@ -67,7 +67,8 @@ object CliSettings:
       sweepEnabled = false,
       sweepMinProbability = 0.05,
       sweepMaxProbability = 1.0,
-      sweepProbabilityStep = 0.05
+      sweepProbabilityStep = 0.05,
+      sweepEdgeActivations = Vector.empty
     )
 
 object ScenarioPresets:
@@ -154,7 +155,7 @@ final case class CliOverrides(
     sweepMinProbability: Option[Double] = None,
     sweepMaxProbability: Option[Double] = None,
     sweepProbabilityStep: Option[Double] = None,
-    recoveryOverrides: Option[Map[Int, Double]] = None
+    sweepEdgeActivations: Option[Vector[EdgeActivation]] = None
 )
 
 object ConfigFileLoader:
@@ -213,7 +214,7 @@ object ConfigFileLoader:
                 sweepMinProbability = overrides.sweepMinProbability.getOrElse(baseWithPreset.sweepMinProbability),
                 sweepMaxProbability = overrides.sweepMaxProbability.getOrElse(baseWithPreset.sweepMaxProbability),
                 sweepProbabilityStep = overrides.sweepProbabilityStep.getOrElse(baseWithPreset.sweepProbabilityStep),
-                recoveryOverrides = overrides.recoveryOverrides.getOrElse(baseWithPreset.recoveryOverrides)
+                sweepEdgeActivations = overrides.sweepEdgeActivations.getOrElse(baseWithPreset.sweepEdgeActivations)
               )
               validateSettings(merged)
 
@@ -223,10 +224,6 @@ object ConfigFileLoader:
         settings.sweepMinProbability > settings.sweepMaxProbability then
       Left("sweep probability range must be within [0.0, 1.0] with minimum <= maximum")
     else if settings.sweepProbabilityStep <= 0.0 then Left("sweep probability step must be > 0.0")
-    else if settings.recoveryOverrides.exists((node, _) => node < 0) then
-      Left("recovery-overrides node ids must be >= 0")
-    else if settings.recoveryOverrides.exists((_, prob) => prob < 0.0 || prob > 1.0) then
-      Left("recovery-overrides values must be in [0.0, 1.0]")
     else Right(settings)
 
   private def buildActivation(onTicks: Int, offTicks: Int, phase: Int): Either[String, EdgeActivation] =
@@ -246,17 +243,6 @@ object ConfigFileLoader:
 
     loaded.map: _ =>
       val map = props.asScala.toMap
-      val recoveryOverridesFromProps =
-        val pairs = map.collect:
-          case (key, value) if key.startsWith("recoveryOverrides.") =>
-            val nodeId = key.stripPrefix("recoveryOverrides.").toIntOption
-            val prob = value.toDoubleOption
-            (nodeId, prob)
-        val parsed = pairs.flatMap:
-          case (Some(node), Some(prob)) => Some(node -> prob)
-          case _                        => None
-        if parsed.isEmpty then None else Some(parsed.toMap)
-
       CliOverrides(
         preset = map.get("preset"),
         graphSource = map.get("graphSource"),
@@ -283,8 +269,7 @@ object ConfigFileLoader:
         sweepEnabled = map.get("sweepEnabled").flatMap(_.toBooleanOption),
         sweepMinProbability = map.get("sweepMinProbability").flatMap(_.toDoubleOption),
         sweepMaxProbability = map.get("sweepMaxProbability").flatMap(_.toDoubleOption),
-        sweepProbabilityStep = map.get("sweepProbabilityStep").flatMap(_.toDoubleOption),
-        recoveryOverrides = recoveryOverridesFromProps
+        sweepProbabilityStep = map.get("sweepProbabilityStep").flatMap(_.toDoubleOption)
       )
 
   private def loadHocon(path: String): Either[String, CliOverrides] =
@@ -293,8 +278,9 @@ object ConfigFileLoader:
     .flatMap: config =>
       for
         initialInfected <- getInitialInfected(config)
-        recoveryOverrides <- getRecoveryOverrides(config)
-      yield CliOverrides(
+        sweepEdgeActivations <- getSweepEdgeActivations(config)
+      yield
+        CliOverrides(
           preset = getString(config, "preset"),
           graphSource = getString(config, "graph.source", "graphSource"),
           graphShape = getString(config, "graph.shape", "graphShape"),
@@ -321,7 +307,7 @@ object ConfigFileLoader:
           sweepMinProbability = getDouble(config, "sweep.min-probability", "sweep.minProbability", "sweepMinProbability"),
           sweepMaxProbability = getDouble(config, "sweep.max-probability", "sweep.maxProbability", "sweepMaxProbability"),
           sweepProbabilityStep = getDouble(config, "sweep.probability-step", "sweep.probabilityStep", "sweepProbabilityStep"),
-          recoveryOverrides = recoveryOverrides
+          sweepEdgeActivations = sweepEdgeActivations
         )
 
   private def getString(config: Config, paths: String*): Option[String] =
@@ -339,26 +325,24 @@ object ConfigFileLoader:
   private def getBoolean(config: Config, paths: String*): Option[Boolean] =
     paths.find(config.hasPath).flatMap(path => Try(config.getBoolean(path)).toOption)
 
-  private def getRecoveryOverrides(config: Config): Either[String, Option[Map[Int, Double]]] =
-    val candidates = Vector("simulation.recovery-overrides", "simulation.recoveryOverrides", "recoveryOverrides")
-    candidates.find(config.hasPath) match
+  private def getSweepEdgeActivations(config: Config): Either[String, Option[Vector[EdgeActivation]]] =
+    val paths = Vector("sweep.activations", "sweep.edge-activations", "sweep.edgeActivations")
+    paths.find(config.hasPath) match
       case None => Right(None)
       case Some(path) =>
-        Try(config.getConfig(path).root().entrySet().asScala.toVector).toEither.left
+        Try(config.getConfigList(path).asScala.toVector).toEither.left
           .map(error => s"invalid $path: ${error.getMessage}")
           .flatMap: entries =>
-            entries.foldLeft[Either[String, Map[Int, Double]]](Right(Map.empty)):
-              case (Right(acc), entry) =>
-                val key = entry.getKey
-                val absolutePath = s"$path.${if key.contains('.') || !key.forall(_.isDigit) then s""""$key"""" else key}"
-                key.toIntOption match
-                  case None => Left(s"recovery-overrides key must be an integer node id, got: $key")
-                  case Some(nodeId) =>
-                    Try(config.getDouble(absolutePath)).toEither.left
-                      .map(error => s"invalid recovery-overrides[$key]: ${error.getMessage}")
-                      .map(value => acc.updated(nodeId, value))
-              case (left, _) => left
-            .map(map => if map.isEmpty then None else Some(map))
+            entries.foldLeft[Either[String, Vector[EdgeActivation]]](Right(Vector.empty)):
+              case (accEither, entry) =>
+                accEither.flatMap: acc =>
+                  val onTicks = getInt(entry, "on-ticks", "onTicks")
+                  val offTicks = getInt(entry, "off-ticks", "offTicks")
+                  (onTicks, offTicks) match
+                    case (Some(on), Some(off)) =>
+                      buildActivation(on, off, getInt(entry, "phase").getOrElse(0)).map(acc :+ _)
+                    case _ => Left(s"$path entries must contain integer on-ticks and off-ticks")
+            .map(values => if values.isEmpty then None else Some(values))
 
   private def getInitialInfected(config: Config): Either[String, Option[String]] =
     val candidates = Vector("simulation.initial-infected", "simulation.initialInfected", "initialInfected")

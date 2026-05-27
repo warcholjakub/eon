@@ -145,9 +145,9 @@ object SimulationEngine:
         rng = rng
       )
     val newRecovered =
-      samplePerNode(
+      sampleNodes(
         nodes = state.infected.toVector.sorted,
-        probabilityFor = node => config.recoveryOverrides.getOrElse(node, config.recoveryProbability),
+        probability = config.recoveryProbability,
         rng = rng
       )
 
@@ -227,10 +227,6 @@ object SimulationEngine:
       Left("recoveryProbability must be in [0.0, 1.0]")
     else if config.initialInfected.exists(node => node < 0 || node >= graph.nodeCount) then
       Left("initialInfected contains nodes outside graph")
-    else if config.recoveryOverrides.exists((_, p) => p < 0.0 || p > 1.0) then
-      Left("recoveryOverrides values must be in [0.0, 1.0]")
-    else if config.recoveryOverrides.keys.exists(node => node < 0 || node >= graph.nodeCount) then
-      Left("recoveryOverrides contains nodes outside graph")
     else Right(())
 
   private def buildNodeStates(
@@ -271,15 +267,6 @@ object SimulationEngine:
   private def sampleNodes(nodes: Vector[Int], probability: Double, rng: Random): Set[Int] =
     nodes.foldLeft(Set.empty[Int]): (acc, node) =>
       if rng.nextDouble() <= probability then acc + node
-      else acc
-
-  private def samplePerNode(
-      nodes: Vector[Int],
-      probabilityFor: Int => Double,
-      rng: Random
-  ): Set[Int] =
-    nodes.foldLeft(Set.empty[Int]): (acc, node) =>
-      if rng.nextDouble() <= probabilityFor(node) then acc + node
       else acc
 
   private def validatePartition(state: SimState, nodeCount: Int): Either[String, Unit] =

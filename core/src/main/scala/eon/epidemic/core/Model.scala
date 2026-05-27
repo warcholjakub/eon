@@ -95,7 +95,6 @@ final case class SimulationConfig(
     seed: Long,
     graphSpec: GraphSpec,
     collectNodeStates: Boolean,
-    recoveryOverrides: Map[Int, Double] = Map.empty,
     nodeGroups: Map[Int, Int] = Map.empty,
     trackedNodes: Set[Int] = Set.empty
 )
@@ -165,10 +164,12 @@ final case class BatchResult(
 final case class ParameterSweepRow(
     infectionProbability: Double,
     recoveryProbability: Double,
-    aggregate: AggregateMetrics
+    edgeActivation: EdgeActivation,
+    summaries: Vector[SimulationSummary]
 )
 
 final case class ParameterSweepResult(
     runsPerPair: Int,
-    rows: Vector[ParameterSweepRow]
+    rows: Vector[ParameterSweepRow],
+    trackedNodes: Set[Int] = Set.empty
 )

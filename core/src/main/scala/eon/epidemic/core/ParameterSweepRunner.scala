@@ -7,28 +7,78 @@ object ParameterSweepRunner:
       maxProbability: Double,
       probabilityStep: Double,
       runsPerPair: Int,
+      edgeActivations: Vector[EdgeActivation] = Vector.empty,
       persistProgress: ParameterSweepResult => Either[String, Unit] = _ => Right(())
   ): Either[String, ParameterSweepResult] =
     probabilityValues(minProbability, maxProbability, probabilityStep).flatMap: probabilities =>
-      val pairs =
+      val activations =
+        if edgeActivations.isEmpty then Vector(configuredActivation(config.graphSpec))
+        else edgeActivations
+      val combinations =
         for
           infectionProbability <- probabilities
           recoveryProbability <- probabilities
-        yield (infectionProbability, recoveryProbability)
+          edgeActivation <- activations
+        yield (infectionProbability, recoveryProbability, edgeActivation)
 
-      pairs.foldLeft[Either[String, Vector[ParameterSweepRow]]](Right(Vector.empty)):
-        case (rowsEither, (infectionProbability, recoveryProbability)) =>
+      combinations.foldLeft[Either[String, Vector[ParameterSweepRow]]](Right(Vector.empty)):
+        case (rowsEither, (infectionProbability, recoveryProbability, edgeActivation)) =>
           rowsEither.flatMap: rows =>
             val pairConfig =
               config.copy(
                 infectionProbability = infectionProbability,
-                recoveryProbability = recoveryProbability
+                recoveryProbability = recoveryProbability,
+                graphSpec = graphSpecWithActivation(config.graphSpec, edgeActivation)
               )
-            BatchRunner.aggregate(pairConfig, runsPerPair).flatMap: aggregate =>
-              val updatedRows = rows :+ ParameterSweepRow(infectionProbability, recoveryProbability, aggregate)
-              val progress = ParameterSweepResult(runsPerPair, updatedRows)
+            BatchRunner.runSummaries(pairConfig, runsPerPair).flatMap: summaries =>
+              val updatedRows = rows :+ ParameterSweepRow(infectionProbability, recoveryProbability, edgeActivation, summaries)
+              val progress = ParameterSweepResult(runsPerPair, updatedRows, config.trackedNodes)
               persistProgress(progress).map(_ => updatedRows)
-      .map(rows => ParameterSweepResult(runsPerPair, rows))
+      .map(rows => ParameterSweepResult(runsPerPair, rows, config.trackedNodes))
+
+  def runStreaming(
+      config: SimulationConfig,
+      minProbability: Double,
+      maxProbability: Double,
+      probabilityStep: Double,
+      runsPerCombination: Int,
+      edgeActivations: Vector[EdgeActivation] = Vector.empty,
+      persistRow: (Int, ParameterSweepRow) => Either[String, Unit]
+  ): Either[String, Int] =
+    probabilityValues(minProbability, maxProbability, probabilityStep).flatMap: probabilities =>
+      val activations =
+        if edgeActivations.isEmpty then Vector(configuredActivation(config.graphSpec))
+        else edgeActivations
+      val combinations =
+        for
+          infectionProbability <- probabilities
+          recoveryProbability <- probabilities
+          edgeActivation <- activations
+        yield (infectionProbability, recoveryProbability, edgeActivation)
+
+      combinations.foldLeft[Either[String, Int]](Right(0)):
+        case (completedEither, (infectionProbability, recoveryProbability, edgeActivation)) =>
+          completedEither.flatMap: completed =>
+            val pairConfig =
+              config.copy(
+                infectionProbability = infectionProbability,
+                recoveryProbability = recoveryProbability,
+                graphSpec = graphSpecWithActivation(config.graphSpec, edgeActivation)
+              )
+            BatchRunner.runSummaries(pairConfig, runsPerCombination).flatMap: summaries =>
+              val row = ParameterSweepRow(infectionProbability, recoveryProbability, edgeActivation, summaries)
+              val nextCompleted = completed + 1
+              persistRow(nextCompleted, row).map(_ => nextCompleted)
+
+  private def configuredActivation(graphSpec: GraphSpec): EdgeActivation =
+    graphSpec match
+      case generated: GraphSpec.Generated => generated.edgeActivation
+      case fromFile: GraphSpec.FromFile   => fromFile.defaultActivation
+
+  private def graphSpecWithActivation(graphSpec: GraphSpec, activation: EdgeActivation): GraphSpec =
+    graphSpec match
+      case generated: GraphSpec.Generated => generated.copy(edgeActivation = activation)
+      case fromFile: GraphSpec.FromFile   => fromFile.copy(defaultActivation = activation)
 
   private def probabilityValues(
       minimum: Double,

@@ -92,12 +92,11 @@ object GraphBuilder:
           val firstNode = 1 + index * clusterSize
           (firstNode until (firstNode + clusterSize)).toVector
 
-      val clusterActivation = EdgeActivation(onTicks = 1, offTicks = 2)
       val clusterEdges =
         clusters.flatMap: nodes =>
           nodes.indices.toVector.flatMap: leftIndex =>
             ((leftIndex + 1) until nodes.size).toVector.map: rightIndex =>
-              Edge(nodes(leftIndex), nodes(rightIndex), randomizeActivation(clusterActivation, rng))
+              Edge(nodes(leftIndex), nodes(rightIndex), randomizeActivation(spec.edgeActivation, rng))
 
       val hubEdges =
         clusters.map: nodes =>

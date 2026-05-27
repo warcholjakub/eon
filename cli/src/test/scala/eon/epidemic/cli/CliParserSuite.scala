@@ -55,6 +55,10 @@ class CliParserSuite extends FunSuite:
         |  min-probability = 0.05
         |  max-probability = 0.50
         |  probability-step = 0.05
+        |  activations = [
+        |    { on-ticks = 1, off-ticks = 0 }
+        |    { on-ticks = 1, off-ticks = 3 }
+        |  ]
         |}
         |""".stripMargin
     )
@@ -64,6 +68,8 @@ class CliParserSuite extends FunSuite:
     assertEquals(parsed.sweepMinProbability, 0.05)
     assertEquals(parsed.sweepMaxProbability, 0.5)
     assertEquals(parsed.sweepProbabilityStep, 0.05)
+    assertEquals(parsed.sweepEdgeActivations.map(_.onTicks), Vector(1, 1))
+    assertEquals(parsed.sweepEdgeActivations.map(_.offTicks), Vector(0, 3))
 
   test("malformed initial-infected list in hocon returns clear error"):
     val file = Files.createTempFile("epidemic-initial-infected", ".conf")

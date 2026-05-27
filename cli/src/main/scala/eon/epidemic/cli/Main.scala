@@ -28,17 +28,20 @@ object Main:
 
   private def execute(config: SimulationConfig, settings: CliSettings): Either[String, Unit] =
     if settings.sweepEnabled then
-      ParameterSweepRunner
-        .run(
-          config = config,
-          minProbability = settings.sweepMinProbability,
-          maxProbability = settings.sweepMaxProbability,
-          probabilityStep = settings.sweepProbabilityStep,
-          runsPerPair = settings.runs,
-          persistProgress = result =>
-            OutputWriter.writeSweep(settings.outputDir, result).map: _ =>
-              println(s"completed parameter pairs: ${result.rows.size}")
-        )
+      OutputWriter
+        .initializeSweep(settings.outputDir, config.trackedNodes, config.nodeGroups.nonEmpty)
+        .flatMap: _ =>
+          ParameterSweepRunner.runStreaming(
+            config = config,
+            minProbability = settings.sweepMinProbability,
+            maxProbability = settings.sweepMaxProbability,
+            probabilityStep = settings.sweepProbabilityStep,
+            runsPerCombination = settings.runs,
+            edgeActivations = settings.sweepEdgeActivations,
+            persistRow = (completed, row) =>
+              OutputWriter.appendSweepRow(settings.outputDir, row, config.trackedNodes, config.nodeGroups.nonEmpty).map: _ =>
+                println(s"completed parameter combinations: $completed")
+          )
         .map(_ => ())
     else if settings.runs <= 1 then
       SimulationEngine
@@ -95,7 +98,6 @@ object Main:
           seed = settings.seed,
           graphSpec = graphSpec,
           collectNodeStates = settings.visualizationEnabled && settings.runs <= 1,
-          recoveryOverrides = settings.recoveryOverrides,
           nodeGroups = nodeGroups,
           trackedNodes = trackedNodes
         )

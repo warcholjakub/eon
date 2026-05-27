@@ -2,18 +2,18 @@ package eon.epidemic.core
 
 object BatchRunner:
   def run(config: SimulationConfig, runs: Int): Either[String, BatchResult] =
+    runSummaries(config, runs).map: summaries =>
+      val aggregate = aggregateMetrics(summaries, config.trackedNodes)
+      BatchResult(runs = runs, summaries = summaries, aggregate = aggregate)
+
+  def runSummaries(config: SimulationConfig, runs: Int): Either[String, Vector[SimulationSummary]] =
     if runs <= 0 then Left("runs must be > 0")
     else
-      val summariesEither =
-        (0 until runs).toVector.foldLeft[Either[String, Vector[SimulationSummary]]](Right(Vector.empty)):
-          case (accEither, runIndex) =>
-            accEither.flatMap: acc =>
-              val runConfig = configForRun(config, runIndex)
-              SimulationEngine.runSummary(runConfig).map(summary => acc :+ summary)
-
-      summariesEither.map: summaries =>
-        val aggregate = aggregateMetrics(summaries, config.trackedNodes)
-        BatchResult(runs = runs, summaries = summaries, aggregate = aggregate)
+      (0 until runs).toVector.foldLeft[Either[String, Vector[SimulationSummary]]](Right(Vector.empty)):
+        case (accEither, runIndex) =>
+          accEither.flatMap: acc =>
+            val runConfig = configForRun(config, runIndex)
+            SimulationEngine.runSummary(runConfig).map(summary => acc :+ summary)
 
   def aggregate(config: SimulationConfig, runs: Int): Either[String, AggregateMetrics] =
     if runs <= 0 then Left("runs must be > 0")

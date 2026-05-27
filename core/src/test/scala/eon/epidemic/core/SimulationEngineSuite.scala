@@ -110,16 +110,41 @@ class SimulationEngineSuite extends FunSuite:
 
     val result =
       ParameterSweepRunner
-        .run(config, minProbability = 0.05, maxProbability = 0.10, probabilityStep = 0.05, runsPerPair = 2)
+        .run(
+          config,
+          minProbability = 0.05,
+          maxProbability = 0.10,
+          probabilityStep = 0.05,
+          runsPerPair = 2,
+          edgeActivations = Vector(EdgeActivation(1, 0), EdgeActivation(1, 1))
+        )
         .toOption
         .get
 
     assertEquals(result.runsPerPair, 2)
-    assertEquals(result.rows.size, 4)
+    assertEquals(result.rows.size, 8)
+    assert(result.rows.forall(_.summaries.size == 2))
     assertEquals(
       result.rows.map(row => (row.infectionProbability, row.recoveryProbability)).toSet,
       Set((0.05, 0.05), (0.05, 0.1), (0.1, 0.05), (0.1, 0.1))
     )
+    assertEquals(result.rows.map(_.edgeActivation).toSet, Set(EdgeActivation(1, 0), EdgeActivation(1, 1)))
+
+    val completed =
+      ParameterSweepRunner
+        .runStreaming(
+          config,
+          minProbability = 0.05,
+          maxProbability = 0.10,
+          probabilityStep = 0.05,
+          runsPerCombination = 2,
+          edgeActivations = Vector(EdgeActivation(1, 0), EdgeActivation(1, 1)),
+          persistRow = (_, _) => Right(())
+        )
+        .toOption
+        .get
+
+    assertEquals(completed, 8)
 
   test("node state collection is optional"):
     val graph = Graph.fromEdges(nodeCount = 2, rawEdges = Vector.empty).toOption.get
@@ -230,37 +255,6 @@ class SimulationEngineSuite extends FunSuite:
 
     assertEquals(run.seed, 52L)
     assertEquals(run.graphSpec, base.graphSpec)
-
-  test("recoveryOverrides applies higher gamma to specific node"):
-    // Node 0 has γ=1.0 (recovers immediately), node 1 has γ=0.0 (never recovers).
-    // Infection starts at 0; after one tick node 0 must be recovered.
-    val graph = Graph.fromEdges(
-      nodeCount = 2,
-      rawEdges = Vector(Edge(0, 1, EdgeActivation(onTicks = 1, offTicks = 0)))
-    ).toOption.get
-
-    val config = SimulationConfig(
-      infectionProbability = 0.0,
-      recoveryProbability = 0.0,
-      initialInfected = Set(0),
-      diseaseModel = DiseaseModel.SIR,
-      stopCondition = StopCondition(stopWhenNoInfected = false, maxTicks = 2),
-      seed = 1,
-      graphSpec = GraphSpec.Generated(
-        shape = GraphShape.ErdosRenyi,
-        nodeCount = 2,
-        edgeActivation = EdgeActivation(1, 0),
-        erdosProbability = 0.0,
-        ringDegree = 0,
-        seed = 1
-      ),
-      collectNodeStates = false,
-      recoveryOverrides = Map(0 -> 1.0)
-    )
-
-    val result = SimulationEngine.runWithGraph(config, graph).toOption.get
-    assertEquals(result.summary.finalRecovered, 1)
-    assertEquals(result.summary.finalInfected, 0)
 
   test("trackedNodes records first infection tick"):
     // Linear chain 0-1-2. Infection starts at 0, β=1, γ=0.

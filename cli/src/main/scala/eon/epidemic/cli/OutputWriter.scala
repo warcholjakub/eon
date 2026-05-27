@@ -3,6 +3,7 @@ package eon.epidemic.cli
 import eon.epidemic.core.BatchResult
 import eon.epidemic.core.NodeHealth
 import eon.epidemic.core.ParameterSweepResult
+import eon.epidemic.core.ParameterSweepRow
 import eon.epidemic.core.SimulationResult
 import eon.epidemic.core.SimulationSummary
 import eon.epidemic.core.TickNodeStates
@@ -10,6 +11,7 @@ import eon.epidemic.core.TickSnapshot
 
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 
 object OutputWriter:
   def writeSingle(
@@ -39,7 +41,26 @@ object OutputWriter:
 
   def writeSweep(outputDir: String, result: ParameterSweepResult): Either[String, Unit] =
     withOutputDir(outputDir): dir =>
-      Files.writeString(dir.resolve("sweep_summary.csv"), renderSweepSummaryCsv(result))
+      Files.deleteIfExists(dir.resolve("sweep_summary.csv"))
+      Files.writeString(dir.resolve("sweep_runs.csv"), renderSweepRunsCsv(result))
+
+  def initializeSweep(outputDir: String, trackedNodes: Set[Int], includeContainment: Boolean): Either[String, Unit] =
+    withOutputDir(outputDir): dir =>
+      Files.deleteIfExists(dir.resolve("sweep_summary.csv"))
+      Files.writeString(dir.resolve("sweep_runs.csv"), renderSweepHeader(trackedNodes, includeContainment) + "\n")
+
+  def appendSweepRow(
+      outputDir: String,
+      row: ParameterSweepRow,
+      trackedNodes: Set[Int],
+      includeContainment: Boolean
+  ): Either[String, Unit] =
+    withOutputDir(outputDir): dir =>
+      Files.writeString(
+        dir.resolve("sweep_runs.csv"),
+        renderSweepRows(Vector(row), trackedNodes, includeContainment),
+        StandardOpenOption.APPEND
+      )
 
   private def withOutputDir(outputDir: String)(write: Path => Unit): Either[String, Unit] =
     try
@@ -95,43 +116,49 @@ object OutputWriter:
 
     (header +: rows).mkString("\n") + "\n"
 
-  private def renderSweepSummaryCsv(result: ParameterSweepResult): String =
-    val trackedNodeIds = result.rows.headOption
-      .map(_.aggregate.trackedNodes.keys.toVector.sorted)
-      .getOrElse(Vector.empty)
+  private def renderSweepRunsCsv(result: ParameterSweepResult): String =
+    val includeContainment = result.rows.exists(_.summaries.exists(_.containedToInitialGroups.isDefined))
+    renderSweepHeader(result.trackedNodes, includeContainment) + "\n" +
+      renderSweepRows(result.rows, result.trackedNodes, includeContainment)
 
-    val trackedHeaders = trackedNodeIds.flatMap: nodeId =>
-      Vector(s"node${nodeId}InfectionRate", s"node${nodeId}AvgTicksUntilInfected")
+  private def renderSweepHeader(trackedNodes: Set[Int], includeContainment: Boolean): String =
+    val trackedHeaders = trackedNodes.toVector.sorted.flatMap: nodeId =>
+      Vector(s"node${nodeId}FirstInfectionTick")
 
     val containmentHeader =
-      if result.rows.headOption.exists(_.aggregate.containmentRate.isDefined) then
-        Vector("containmentRate")
-      else Vector.empty
+      if includeContainment then Vector("containedToInitialGroups") else Vector.empty
 
-    val header =
-      (Vector(
-        "infectionProbability", "recoveryProbability", "runs",
-        "minTotalEverInfected", "maxTotalEverInfected", "avgTotalEverInfected",
-        "minDurationTicks", "maxDurationTicks", "avgDurationTicks",
-        "minPeakInfected", "maxPeakInfected", "avgPeakInfected"
-      ) ++ containmentHeader ++ trackedHeaders).mkString(",")
+    (Vector(
+      "infectionProbability", "recoveryProbability",
+      "activationOnTicks", "activationOffTicks", "activationPhase", "activationActiveFraction", "run",
+      "totalEverInfected", "epidemicDurationTicks", "peakInfected", "peakTick",
+      "finalSusceptible", "finalInfected", "finalRecovered"
+    ) ++ containmentHeader ++ trackedHeaders).mkString(",")
 
-    val rows = result.rows.map: row =>
-      val a = row.aggregate
-      val base = Vector(
-        row.infectionProbability, row.recoveryProbability, result.runsPerPair,
-        a.minTotalEverInfected, a.maxTotalEverInfected, a.avgTotalEverInfected,
-        a.minDurationTicks, a.maxDurationTicks, a.avgDurationTicks,
-        a.minPeakInfected, a.maxPeakInfected, a.avgPeakInfected
-      ).map(_.toString)
-      val containmentCols = a.containmentRate.map(r => Vector(r.toString)).getOrElse(Vector.empty)
-      val trackedCols = trackedNodeIds.flatMap: nodeId =>
-        a.trackedNodes.get(nodeId) match
-          case Some(m) => Vector(m.infectionRate.toString, m.avgTicksUntilInfected.map(_.toString).getOrElse(""))
-          case None    => Vector("", "")
-      (base ++ containmentCols ++ trackedCols).mkString(",")
+  private def renderSweepRows(
+      rows: Vector[ParameterSweepRow],
+      trackedNodes: Set[Int],
+      includeContainment: Boolean
+  ): String =
+    val trackedNodeIds = trackedNodes.toVector.sorted
+    val encodedRows = rows.flatMap: row =>
+      row.summaries.zipWithIndex.map: (summary, index) =>
+        val activeFraction =
+          row.edgeActivation.onTicks.toDouble / (row.edgeActivation.onTicks + row.edgeActivation.offTicks).toDouble
+        val base = Vector(
+          row.infectionProbability, row.recoveryProbability,
+          row.edgeActivation.onTicks, row.edgeActivation.offTicks, row.edgeActivation.phase, activeFraction, index + 1,
+          summary.totalEverInfected, summary.epidemicDurationTicks, summary.peakInfected, summary.peakTick,
+          summary.finalSusceptible, summary.finalInfected, summary.finalRecovered
+        ).map(_.toString)
+        val containmentCols =
+          if !includeContainment then Vector.empty
+          else Vector(summary.containedToInitialGroups.map(_.toString).getOrElse(""))
+        val trackedCols =
+          trackedNodeIds.map(nodeId => summary.trackedNodeFirstInfection.get(nodeId).map(_.toString).getOrElse(""))
+        (base ++ containmentCols ++ trackedCols).mkString(",")
 
-    (header +: rows).mkString("\n") + "\n"
+    encodedRows.mkString("", "\n", if encodedRows.isEmpty then "" else "\n")
 
   private def renderVisualizationHtml(
       result: SimulationResult,

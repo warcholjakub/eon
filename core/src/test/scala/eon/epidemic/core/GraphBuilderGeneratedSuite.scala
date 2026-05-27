@@ -47,11 +47,11 @@ class GraphBuilderGeneratedSuite extends FunSuite:
     val error = GraphBuilder.build(spec).swap.toOption.get
     assertEquals(error, "nodeCount must be >= 4 for clustered-vpn graph")
 
-  test("three-clusters-hub builds three complete clusters connected only through hub"):
+  test("three-clusters-hub builds three complete clusters with configured activation"):
     val spec = GraphSpec.Generated(
       shape = GraphShape.ThreeClustersHub,
       nodeCount = 25,
-      edgeActivation = EdgeActivation(1, 0),
+      edgeActivation = EdgeActivation(2, 1),
       erdosProbability = 0.0,
       ringDegree = 0,
       seed = 42
@@ -65,8 +65,7 @@ class GraphBuilderGeneratedSuite extends FunSuite:
       edge.a != 0 && edge.b != 0 && !clusters.exists(cluster => cluster.contains(edge.a) && cluster.contains(edge.b))
 
     assertEquals(hubEdges.map(_.endpoints).toSet, Set((0, 1), (0, 9), (0, 17)))
-    assert(clusterEdges.forall(edge => edge.activation.onTicks == 1 && edge.activation.offTicks == 2))
-    assert(hubEdges.forall(_.activation == EdgeActivation(1, 0)))
+    assert(graph.edges.forall(edge => edge.activation.onTicks == 2 && edge.activation.offTicks == 1))
     assertEquals(edgesBetweenClusters, Vector.empty)
     assertEquals(graph.edges.size, 3 * 28 + 3)
 
