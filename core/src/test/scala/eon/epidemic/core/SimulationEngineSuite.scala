@@ -42,6 +42,19 @@ class SimulationEngineSuite extends FunSuite:
     assertEquals(summary.peakInfected, 2)
     assertEquals(summary.peakTick, 1)
 
+  test("infection probability increases with active infected contacts"):
+    assertEquals(SimulationEngine.infectionProbabilityForContacts(baseProbability = 0.2, contactCount = 0), 0.0)
+    assertEqualsDouble(
+      SimulationEngine.infectionProbabilityForContacts(baseProbability = 0.2, contactCount = 1),
+      0.2,
+      1e-12
+    )
+    assertEqualsDouble(
+      SimulationEngine.infectionProbabilityForContacts(baseProbability = 0.2, contactCount = 3),
+      0.488,
+      1e-12
+    )
+
   test("simulation stops at max ticks when infection persists"):
     val graph = Graph.fromEdges(nodeCount = 1, rawEdges = Vector.empty).toOption.get
 

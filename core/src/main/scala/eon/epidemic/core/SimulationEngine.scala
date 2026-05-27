@@ -129,19 +129,27 @@ object SimulationEngine:
       rng: Random,
       recordTimeseries: Boolean
   ): Either[String, SimState] =
-    val infectionCandidates =
+    val infectionContacts =
       state.infected.toVector
         .flatMap: infectedNode =>
           graph.neighbors(infectedNode).collect:
             case (neighbor, activation)
                 if state.susceptible.contains(neighbor) && activation.isActive(state.tick) =>
               neighbor
-        .toSet
+        .foldLeft(Map.empty[Int, Int]): (acc, node) =>
+          acc.updatedWith(node):
+            case Some(contactCount) => Some(contactCount + 1)
+            case None               => Some(1)
+
+    val infectionProbabilities =
+      infectionContacts.toVector
+        .sortBy(_._1)
+        .map: (node, contactCount) =>
+          node -> infectionProbabilityForContacts(config.infectionProbability, contactCount)
 
     val newInfected =
-      sampleNodes(
-        nodes = infectionCandidates.toVector.sorted,
-        probability = config.infectionProbability,
+      sampleNodesWithProbabilities(
+        nodes = infectionProbabilities,
         rng = rng
       )
     val newRecovered =
@@ -268,6 +276,16 @@ object SimulationEngine:
     nodes.foldLeft(Set.empty[Int]): (acc, node) =>
       if rng.nextDouble() <= probability then acc + node
       else acc
+
+  private def sampleNodesWithProbabilities(nodes: Vector[(Int, Double)], rng: Random): Set[Int] =
+    nodes.foldLeft(Set.empty[Int]):
+      case (acc, (node, probability)) =>
+        if rng.nextDouble() <= probability then acc + node
+        else acc
+
+  private[core] def infectionProbabilityForContacts(baseProbability: Double, contactCount: Int): Double =
+    if contactCount <= 0 then 0.0
+    else 1.0 - Math.pow(1.0 - baseProbability, contactCount.toDouble)
 
   private def validatePartition(state: SimState, nodeCount: Int): Either[String, Unit] =
     val allNodes = (0 until nodeCount).toSet
