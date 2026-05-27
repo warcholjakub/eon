@@ -4,6 +4,7 @@ enum GraphShape:
   case ErdosRenyi
   case Ring
   case ClusteredVpn
+  case ThreeClustersHub
 
 final case class EdgeActivation(onTicks: Int, offTicks: Int, phase: Int = 0):
   require(onTicks >= 0, "onTicks must be >= 0")
@@ -93,7 +94,10 @@ final case class SimulationConfig(
     stopCondition: StopCondition,
     seed: Long,
     graphSpec: GraphSpec,
-    collectNodeStates: Boolean
+    collectNodeStates: Boolean,
+    recoveryOverrides: Map[Int, Double] = Map.empty,
+    nodeGroups: Map[Int, Int] = Map.empty,
+    trackedNodes: Set[Int] = Set.empty
 )
 
 final case class TickSnapshot(
@@ -120,7 +124,9 @@ final case class SimulationSummary(
     peakTick: Int,
     finalSusceptible: Int,
     finalInfected: Int,
-    finalRecovered: Int
+    finalRecovered: Int,
+    trackedNodeFirstInfection: Map[Int, Int] = Map.empty,
+    containedToInitialGroups: Option[Boolean] = None
 )
 
 final case class SimulationResult(
@@ -129,6 +135,11 @@ final case class SimulationResult(
     tickNodeStates: Option[Vector[TickNodeStates]],
     graph: Graph,
     layoutHint: Option[String]
+)
+
+final case class TrackedNodeMetrics(
+    infectionRate: Double,
+    avgTicksUntilInfected: Option[Double]
 )
 
 final case class AggregateMetrics(
@@ -140,11 +151,24 @@ final case class AggregateMetrics(
     avgDurationTicks: Double,
     minPeakInfected: Int,
     maxPeakInfected: Int,
-    avgPeakInfected: Double
+    avgPeakInfected: Double,
+    containmentRate: Option[Double] = None,
+    trackedNodes: Map[Int, TrackedNodeMetrics] = Map.empty
 )
 
 final case class BatchResult(
     runs: Int,
     summaries: Vector[SimulationSummary],
     aggregate: AggregateMetrics
+)
+
+final case class ParameterSweepRow(
+    infectionProbability: Double,
+    recoveryProbability: Double,
+    aggregate: AggregateMetrics
+)
+
+final case class ParameterSweepResult(
+    runsPerPair: Int,
+    rows: Vector[ParameterSweepRow]
 )

@@ -2,6 +2,7 @@ package eon.epidemic.cli
 
 import eon.epidemic.core.BatchResult
 import eon.epidemic.core.NodeHealth
+import eon.epidemic.core.ParameterSweepResult
 import eon.epidemic.core.SimulationResult
 import eon.epidemic.core.SimulationSummary
 import eon.epidemic.core.TickNodeStates
@@ -35,6 +36,10 @@ object OutputWriter:
       val runsPath = dir.resolve("batch_runs.csv")
       Files.writeString(summaryPath, renderBatchSummaryJson(result))
       Files.writeString(runsPath, renderBatchRunsCsv(result.summaries))
+
+  def writeSweep(outputDir: String, result: ParameterSweepResult): Either[String, Unit] =
+    withOutputDir(outputDir): dir =>
+      Files.writeString(dir.resolve("sweep_summary.csv"), renderSweepSummaryCsv(result))
 
   private def withOutputDir(outputDir: String)(write: Path => Unit): Either[String, Unit] =
     try
@@ -87,6 +92,44 @@ object OutputWriter:
       "run,totalEverInfected,epidemicDurationTicks,peakInfected,peakTick,finalSusceptible,finalInfected,finalRecovered"
     val rows = summaries.zipWithIndex.map: (summary, index) =>
       s"${index + 1},${summary.totalEverInfected},${summary.epidemicDurationTicks},${summary.peakInfected},${summary.peakTick},${summary.finalSusceptible},${summary.finalInfected},${summary.finalRecovered}"
+
+    (header +: rows).mkString("\n") + "\n"
+
+  private def renderSweepSummaryCsv(result: ParameterSweepResult): String =
+    val trackedNodeIds = result.rows.headOption
+      .map(_.aggregate.trackedNodes.keys.toVector.sorted)
+      .getOrElse(Vector.empty)
+
+    val trackedHeaders = trackedNodeIds.flatMap: nodeId =>
+      Vector(s"node${nodeId}InfectionRate", s"node${nodeId}AvgTicksUntilInfected")
+
+    val containmentHeader =
+      if result.rows.headOption.exists(_.aggregate.containmentRate.isDefined) then
+        Vector("containmentRate")
+      else Vector.empty
+
+    val header =
+      (Vector(
+        "infectionProbability", "recoveryProbability", "runs",
+        "minTotalEverInfected", "maxTotalEverInfected", "avgTotalEverInfected",
+        "minDurationTicks", "maxDurationTicks", "avgDurationTicks",
+        "minPeakInfected", "maxPeakInfected", "avgPeakInfected"
+      ) ++ containmentHeader ++ trackedHeaders).mkString(",")
+
+    val rows = result.rows.map: row =>
+      val a = row.aggregate
+      val base = Vector(
+        row.infectionProbability, row.recoveryProbability, result.runsPerPair,
+        a.minTotalEverInfected, a.maxTotalEverInfected, a.avgTotalEverInfected,
+        a.minDurationTicks, a.maxDurationTicks, a.avgDurationTicks,
+        a.minPeakInfected, a.maxPeakInfected, a.avgPeakInfected
+      ).map(_.toString)
+      val containmentCols = a.containmentRate.map(r => Vector(r.toString)).getOrElse(Vector.empty)
+      val trackedCols = trackedNodeIds.flatMap: nodeId =>
+        a.trackedNodes.get(nodeId) match
+          case Some(m) => Vector(m.infectionRate.toString, m.avgTicksUntilInfected.map(_.toString).getOrElse(""))
+          case None    => Vector("", "")
+      (base ++ containmentCols ++ trackedCols).mkString(",")
 
     (header +: rows).mkString("\n") + "\n"
 
@@ -270,6 +313,28 @@ object OutputWriter:
        |          });
        |
        |        return [...cluster(leftNodes, leftCenterX), ...cluster(rightNodes, rightCenterX)];
+       |      }
+       |
+       |      if (data.layoutHint === "three-clusters-hub") {
+       |        const clusterSize = Math.floor((data.nodeCount - 1) / 3);
+       |        const radius = 96;
+       |        const centers = [
+       |          { x: graphWidth * 0.5, y: graphHeight * 0.22 },
+       |          { x: graphWidth * 0.27, y: graphHeight * 0.7 },
+       |          { x: graphWidth * 0.73, y: graphHeight * 0.7 }
+       |        ];
+       |        const hub = { x: graphWidth * 0.5, y: graphHeight * 0.5 };
+       |
+       |        const cluster = center =>
+       |          Array.from({ length: clusterSize }, (_, idx) => {
+       |            const angle = (Math.PI * 2 * idx) / Math.max(1, clusterSize) - Math.PI / 2;
+       |            return {
+       |              x: center.x + Math.cos(angle) * radius,
+       |              y: center.y + Math.sin(angle) * radius
+       |            };
+       |          });
+       |
+       |        return [hub, ...centers.flatMap(cluster)];
        |      }
        |
        |      return Array.from({ length: data.nodeCount }, (_, idx) => {

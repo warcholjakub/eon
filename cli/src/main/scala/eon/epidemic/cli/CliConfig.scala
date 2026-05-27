@@ -33,7 +33,12 @@ final case class CliSettings(
     seed: Long,
     runs: Int,
     outputDir: String,
-    visualizationEnabled: Boolean
+    visualizationEnabled: Boolean,
+    sweepEnabled: Boolean,
+    sweepMinProbability: Double,
+    sweepMaxProbability: Double,
+    sweepProbabilityStep: Double,
+    recoveryOverrides: Map[Int, Double] = Map.empty
 )
 
 object CliSettings:
@@ -58,7 +63,11 @@ object CliSettings:
       seed = 42L,
       runs = 1,
       outputDir = "out",
-      visualizationEnabled = true
+      visualizationEnabled = true,
+      sweepEnabled = false,
+      sweepMinProbability = 0.05,
+      sweepMaxProbability = 1.0,
+      sweepProbabilityStep = 0.05
     )
 
 object ScenarioPresets:
@@ -140,7 +149,12 @@ final case class CliOverrides(
     seed: Option[Long] = None,
     runs: Option[Int] = None,
     outputDir: Option[String] = None,
-    visualizationEnabled: Option[Boolean] = None
+    visualizationEnabled: Option[Boolean] = None,
+    sweepEnabled: Option[Boolean] = None,
+    sweepMinProbability: Option[Double] = None,
+    sweepMaxProbability: Option[Double] = None,
+    sweepProbabilityStep: Option[Double] = None,
+    recoveryOverrides: Option[Map[Int, Double]] = None
 )
 
 object ConfigFileLoader:
@@ -194,12 +208,25 @@ object ConfigFileLoader:
                 runs = overrides.runs.getOrElse(baseWithPreset.runs),
                 outputDir = overrides.outputDir.getOrElse(baseWithPreset.outputDir),
                 visualizationEnabled =
-                  overrides.visualizationEnabled.getOrElse(baseWithPreset.visualizationEnabled)
+                  overrides.visualizationEnabled.getOrElse(baseWithPreset.visualizationEnabled),
+                sweepEnabled = overrides.sweepEnabled.getOrElse(baseWithPreset.sweepEnabled),
+                sweepMinProbability = overrides.sweepMinProbability.getOrElse(baseWithPreset.sweepMinProbability),
+                sweepMaxProbability = overrides.sweepMaxProbability.getOrElse(baseWithPreset.sweepMaxProbability),
+                sweepProbabilityStep = overrides.sweepProbabilityStep.getOrElse(baseWithPreset.sweepProbabilityStep),
+                recoveryOverrides = overrides.recoveryOverrides.getOrElse(baseWithPreset.recoveryOverrides)
               )
               validateSettings(merged)
 
   private def validateSettings(settings: CliSettings): Either[String, CliSettings] =
     if settings.runs < 1 then Left("runs must be >= 1")
+    else if settings.sweepMinProbability < 0.0 || settings.sweepMaxProbability > 1.0 ||
+        settings.sweepMinProbability > settings.sweepMaxProbability then
+      Left("sweep probability range must be within [0.0, 1.0] with minimum <= maximum")
+    else if settings.sweepProbabilityStep <= 0.0 then Left("sweep probability step must be > 0.0")
+    else if settings.recoveryOverrides.exists((node, _) => node < 0) then
+      Left("recovery-overrides node ids must be >= 0")
+    else if settings.recoveryOverrides.exists((_, prob) => prob < 0.0 || prob > 1.0) then
+      Left("recovery-overrides values must be in [0.0, 1.0]")
     else Right(settings)
 
   private def buildActivation(onTicks: Int, offTicks: Int, phase: Int): Either[String, EdgeActivation] =
@@ -219,6 +246,17 @@ object ConfigFileLoader:
 
     loaded.map: _ =>
       val map = props.asScala.toMap
+      val recoveryOverridesFromProps =
+        val pairs = map.collect:
+          case (key, value) if key.startsWith("recoveryOverrides.") =>
+            val nodeId = key.stripPrefix("recoveryOverrides.").toIntOption
+            val prob = value.toDoubleOption
+            (nodeId, prob)
+        val parsed = pairs.flatMap:
+          case (Some(node), Some(prob)) => Some(node -> prob)
+          case _                        => None
+        if parsed.isEmpty then None else Some(parsed.toMap)
+
       CliOverrides(
         preset = map.get("preset"),
         graphSource = map.get("graphSource"),
@@ -241,15 +279,22 @@ object ConfigFileLoader:
         seed = map.get("seed").flatMap(_.toLongOption),
         runs = map.get("runs").flatMap(_.toIntOption),
         outputDir = map.get("outputDir"),
-        visualizationEnabled = map.get("visualizationEnabled").flatMap(_.toBooleanOption)
+        visualizationEnabled = map.get("visualizationEnabled").flatMap(_.toBooleanOption),
+        sweepEnabled = map.get("sweepEnabled").flatMap(_.toBooleanOption),
+        sweepMinProbability = map.get("sweepMinProbability").flatMap(_.toDoubleOption),
+        sweepMaxProbability = map.get("sweepMaxProbability").flatMap(_.toDoubleOption),
+        sweepProbabilityStep = map.get("sweepProbabilityStep").flatMap(_.toDoubleOption),
+        recoveryOverrides = recoveryOverridesFromProps
       )
 
   private def loadHocon(path: String): Either[String, CliOverrides] =
     Try(ConfigFactory.parseFile(File(path)).resolve()).toEither.left.map: error =>
       s"failed to parse HOCON config: ${error.getMessage}"
     .flatMap: config =>
-      getInitialInfected(config).map: initialInfected =>
-        CliOverrides(
+      for
+        initialInfected <- getInitialInfected(config)
+        recoveryOverrides <- getRecoveryOverrides(config)
+      yield CliOverrides(
           preset = getString(config, "preset"),
           graphSource = getString(config, "graph.source", "graphSource"),
           graphShape = getString(config, "graph.shape", "graphShape"),
@@ -271,7 +316,12 @@ object ConfigFileLoader:
           seed = getLong(config, "simulation.seed", "seed"),
           runs = getInt(config, "simulation.runs", "runs"),
           outputDir = getString(config, "output.dir", "outputDir"),
-          visualizationEnabled = getBoolean(config, "output.visualization", "visualizationEnabled")
+          visualizationEnabled = getBoolean(config, "output.visualization", "visualizationEnabled"),
+          sweepEnabled = getBoolean(config, "sweep.enabled", "sweepEnabled"),
+          sweepMinProbability = getDouble(config, "sweep.min-probability", "sweep.minProbability", "sweepMinProbability"),
+          sweepMaxProbability = getDouble(config, "sweep.max-probability", "sweep.maxProbability", "sweepMaxProbability"),
+          sweepProbabilityStep = getDouble(config, "sweep.probability-step", "sweep.probabilityStep", "sweepProbabilityStep"),
+          recoveryOverrides = recoveryOverrides
         )
 
   private def getString(config: Config, paths: String*): Option[String] =
@@ -288,6 +338,27 @@ object ConfigFileLoader:
 
   private def getBoolean(config: Config, paths: String*): Option[Boolean] =
     paths.find(config.hasPath).flatMap(path => Try(config.getBoolean(path)).toOption)
+
+  private def getRecoveryOverrides(config: Config): Either[String, Option[Map[Int, Double]]] =
+    val candidates = Vector("simulation.recovery-overrides", "simulation.recoveryOverrides", "recoveryOverrides")
+    candidates.find(config.hasPath) match
+      case None => Right(None)
+      case Some(path) =>
+        Try(config.getConfig(path).root().entrySet().asScala.toVector).toEither.left
+          .map(error => s"invalid $path: ${error.getMessage}")
+          .flatMap: entries =>
+            entries.foldLeft[Either[String, Map[Int, Double]]](Right(Map.empty)):
+              case (Right(acc), entry) =>
+                val key = entry.getKey
+                val absolutePath = s"$path.${if key.contains('.') || !key.forall(_.isDigit) then s""""$key"""" else key}"
+                key.toIntOption match
+                  case None => Left(s"recovery-overrides key must be an integer node id, got: $key")
+                  case Some(nodeId) =>
+                    Try(config.getDouble(absolutePath)).toEither.left
+                      .map(error => s"invalid recovery-overrides[$key]: ${error.getMessage}")
+                      .map(value => acc.updated(nodeId, value))
+              case (left, _) => left
+            .map(map => if map.isEmpty then None else Some(map))
 
   private def getInitialInfected(config: Config): Either[String, Option[String]] =
     val candidates = Vector("simulation.initial-infected", "simulation.initialInfected", "initialInfected")
@@ -313,6 +384,7 @@ object ConfigFileLoader:
       case "erdos" | "erdosrenyi" | "erdos-renyi" => Right(GraphShape.ErdosRenyi)
       case "ring"                                   => Right(GraphShape.Ring)
       case "clustered-vpn" | "clusteredvpn" | "office-vpn" => Right(GraphShape.ClusteredVpn)
+      case "three-clusters-hub" | "threeclustershub" => Right(GraphShape.ThreeClustersHub)
       case other                                     => Left(s"unsupported graph shape: $other")
 
   private def parseDiseaseModel(raw: String): Either[String, DiseaseModel] =

@@ -7,19 +7,47 @@ object SimulationEngine:
   def run(config: SimulationConfig): Either[String, SimulationResult] =
     GraphBuilder.build(config.graphSpec).flatMap(graph => runWithGraph(config, graph))
 
+  def runSummary(config: SimulationConfig): Either[String, SimulationSummary] =
+    GraphBuilder.build(config.graphSpec).flatMap(graph => runSummaryWithGraph(config, graph))
+
   def runWithGraph(config: SimulationConfig, graph: Graph): Either[String, SimulationResult] =
+    runState(config, graph, recordTimeseries = true).map: finalState =>
+      SimulationResult(
+        summary = summary(finalState, config),
+        timeseries = finalState.timeseries,
+        tickNodeStates = finalState.tickNodeStates,
+        graph = graph,
+        layoutHint = layoutHint(config.graphSpec)
+      )
+
+  private def runSummaryWithGraph(config: SimulationConfig, graph: Graph): Either[String, SimulationSummary] =
+    runState(config, graph, recordTimeseries = false).map(state => summary(state, config))
+
+  private def runState(
+      config: SimulationConfig,
+      graph: Graph,
+      recordTimeseries: Boolean
+  ): Either[String, SimState] =
     validateConfig(config, graph).flatMap: _ =>
       val rng = Random(config.seed)
       val allNodes = (0 until graph.nodeCount).toSet
       val initialInfected = config.initialInfected
       val initialRecovered = Set.empty[Int]
       val initialSusceptible = allNodes -- initialInfected
-      val initialSnapshot = TickSnapshot(
-        tick = 0,
-        susceptible = initialSusceptible.size,
-        infected = initialInfected.size,
-        recovered = initialRecovered.size
-      )
+      val initialTimeseries =
+        if recordTimeseries then
+          Vector(
+            TickSnapshot(
+              tick = 0,
+              susceptible = initialSusceptible.size,
+              infected = initialInfected.size,
+              recovered = initialRecovered.size
+            )
+          )
+        else Vector.empty
+
+      val initialTrackedFirstInfection: Map[Int, Int] =
+        (config.trackedNodes intersect initialInfected).iterator.map(node => node -> 0).toMap
 
       val initialState = SimState(
         tick = 0,
@@ -27,39 +55,45 @@ object SimulationEngine:
         infected = initialInfected,
         recovered = initialRecovered,
         everInfected = initialInfected,
-        timeseries = Vector(initialSnapshot),
+        timeseries = initialTimeseries,
         tickNodeStates =
           initialNodeStates(
-            collectNodeStates = config.collectNodeStates,
+            collectNodeStates = recordTimeseries && config.collectNodeStates,
             nodeCount = graph.nodeCount,
             susceptible = initialSusceptible,
             infected = initialInfected,
             recovered = initialRecovered
           ),
         peakInfected = initialInfected.size,
-        peakTick = 0
+        peakTick = 0,
+        trackedFirstInfection = initialTrackedFirstInfection
       )
 
       validatePartition(initialState, graph.nodeCount)
-        .flatMap(_ => loop(Right(initialState), config, graph, rng))
-        .map: finalState =>
-          val summary = SimulationSummary(
-            totalEverInfected = finalState.everInfected.size,
-            epidemicDurationTicks = finalState.tick,
-            peakInfected = finalState.peakInfected,
-            peakTick = finalState.peakTick,
-            finalSusceptible = finalState.susceptible.size,
-            finalInfected = finalState.infected.size,
-            finalRecovered = finalState.recovered.size
-          )
+        .flatMap(_ => loop(Right(initialState), config, graph, rng, recordTimeseries))
 
-          SimulationResult(
-            summary = summary,
-            timeseries = finalState.timeseries,
-            tickNodeStates = finalState.tickNodeStates,
-            graph = graph,
-            layoutHint = layoutHint(config.graphSpec)
-          )
+  private def summary(state: SimState, config: SimulationConfig): SimulationSummary =
+    SimulationSummary(
+      totalEverInfected = state.everInfected.size,
+      epidemicDurationTicks = state.tick,
+      peakInfected = state.peakInfected,
+      peakTick = state.peakTick,
+      finalSusceptible = state.susceptible.size,
+      finalInfected = state.infected.size,
+      finalRecovered = state.recovered.size,
+      trackedNodeFirstInfection = state.trackedFirstInfection,
+      containedToInitialGroups = computeContainment(state, config)
+    )
+
+  private def computeContainment(state: SimState, config: SimulationConfig): Option[Boolean] =
+    // Containment is meaningful only when caller supplied a group partition.
+    // A node missing from the map is ignored — its hypothetical group can't
+    // be classified as "outside the initial groups".
+    if config.nodeGroups.isEmpty then None
+    else
+      val initialGroups = config.initialInfected.flatMap(config.nodeGroups.get)
+      val everInfectedGroups = state.everInfected.flatMap(config.nodeGroups.get)
+      Some(everInfectedGroups.subsetOf(initialGroups))
 
   private final case class SimState(
       tick: Int,
@@ -70,7 +104,8 @@ object SimulationEngine:
       timeseries: Vector[TickSnapshot],
       tickNodeStates: Option[Vector[TickNodeStates]],
       peakInfected: Int,
-      peakTick: Int
+      peakTick: Int,
+      trackedFirstInfection: Map[Int, Int]
   )
 
   @tailrec
@@ -78,19 +113,21 @@ object SimulationEngine:
       stateEither: Either[String, SimState],
       config: SimulationConfig,
       graph: Graph,
-      rng: Random
+      rng: Random,
+      recordTimeseries: Boolean
   ): Either[String, SimState] =
     stateEither match
       case Left(error) => Left(error)
       case Right(state) =>
         if shouldStop(state, config.stopCondition) then Right(state)
-        else loop(step(state, config, graph, rng), config, graph, rng)
+        else loop(step(state, config, graph, rng, recordTimeseries), config, graph, rng, recordTimeseries)
 
   private def step(
       state: SimState,
       config: SimulationConfig,
       graph: Graph,
-      rng: Random
+      rng: Random,
+      recordTimeseries: Boolean
   ): Either[String, SimState] =
     val infectionCandidates =
       state.infected.toVector
@@ -108,9 +145,9 @@ object SimulationEngine:
         rng = rng
       )
     val newRecovered =
-      sampleNodes(
+      samplePerNode(
         nodes = state.infected.toVector.sorted,
-        probability = config.recoveryProbability,
+        probabilityFor = node => config.recoveryOverrides.getOrElse(node, config.recoveryProbability),
         rng = rng
       )
 
@@ -131,12 +168,21 @@ object SimulationEngine:
     val nextEverInfected = state.everInfected ++ newInfected
     val nextTick = state.tick + 1
 
-    val nextSnapshot = TickSnapshot(
-      tick = nextTick,
-      susceptible = nextSusceptible.size,
-      infected = nextInfected.size,
-      recovered = nextRecovered.size
-    )
+    val nextTrackedFirstInfection =
+      newInfected.iterator
+        .filter(config.trackedNodes.contains)
+        .filterNot(state.trackedFirstInfection.contains)
+        .foldLeft(state.trackedFirstInfection)((acc, node) => acc.updated(node, nextTick))
+
+    val nextTimeseries =
+      if recordTimeseries then
+        state.timeseries :+ TickSnapshot(
+          tick = nextTick,
+          susceptible = nextSusceptible.size,
+          infected = nextInfected.size,
+          recovered = nextRecovered.size
+        )
+      else state.timeseries
 
     val (nextPeakInfected, nextPeakTick) =
       if nextInfected.size > state.peakInfected then (nextInfected.size, nextTick)
@@ -161,10 +207,11 @@ object SimulationEngine:
       infected = nextInfected,
       recovered = nextRecovered,
       everInfected = nextEverInfected,
-      timeseries = state.timeseries :+ nextSnapshot,
+      timeseries = nextTimeseries,
       tickNodeStates = nextTickNodeStates,
       peakInfected = nextPeakInfected,
-      peakTick = nextPeakTick
+      peakTick = nextPeakTick,
+      trackedFirstInfection = nextTrackedFirstInfection
     )
 
     validatePartition(nextState, graph.nodeCount).map(_ => nextState)
@@ -180,6 +227,10 @@ object SimulationEngine:
       Left("recoveryProbability must be in [0.0, 1.0]")
     else if config.initialInfected.exists(node => node < 0 || node >= graph.nodeCount) then
       Left("initialInfected contains nodes outside graph")
+    else if config.recoveryOverrides.exists((_, p) => p < 0.0 || p > 1.0) then
+      Left("recoveryOverrides values must be in [0.0, 1.0]")
+    else if config.recoveryOverrides.keys.exists(node => node < 0 || node >= graph.nodeCount) then
+      Left("recoveryOverrides contains nodes outside graph")
     else Right(())
 
   private def buildNodeStates(
@@ -222,6 +273,15 @@ object SimulationEngine:
       if rng.nextDouble() <= probability then acc + node
       else acc
 
+  private def samplePerNode(
+      nodes: Vector[Int],
+      probabilityFor: Int => Double,
+      rng: Random
+  ): Set[Int] =
+    nodes.foldLeft(Set.empty[Int]): (acc, node) =>
+      if rng.nextDouble() <= probabilityFor(node) then acc + node
+      else acc
+
   private def validatePartition(state: SimState, nodeCount: Int): Either[String, Unit] =
     val allNodes = (0 until nodeCount).toSet
     val union = state.susceptible union state.infected union state.recovered
@@ -239,4 +299,6 @@ object SimulationEngine:
     spec match
       case generated: GraphSpec.Generated if generated.shape == GraphShape.ClusteredVpn =>
         Some("clustered-vpn")
+      case generated: GraphSpec.Generated if generated.shape == GraphShape.ThreeClustersHub =>
+        Some("three-clusters-hub")
       case _ => None

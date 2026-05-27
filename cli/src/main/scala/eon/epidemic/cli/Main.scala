@@ -2,7 +2,9 @@ package eon.epidemic.cli
 
 import eon.epidemic.core.BatchRunner
 import eon.epidemic.core.EdgeActivation
+import eon.epidemic.core.GraphShape
 import eon.epidemic.core.GraphSpec
+import eon.epidemic.core.ParameterSweepRunner
 import eon.epidemic.core.SimulationConfig
 import eon.epidemic.core.SimulationEngine
 import eon.epidemic.core.StopCondition
@@ -25,7 +27,20 @@ object Main:
         System.exit(1)
 
   private def execute(config: SimulationConfig, settings: CliSettings): Either[String, Unit] =
-    if settings.runs <= 1 then
+    if settings.sweepEnabled then
+      ParameterSweepRunner
+        .run(
+          config = config,
+          minProbability = settings.sweepMinProbability,
+          maxProbability = settings.sweepMaxProbability,
+          probabilityStep = settings.sweepProbabilityStep,
+          runsPerPair = settings.runs,
+          persistProgress = result =>
+            OutputWriter.writeSweep(settings.outputDir, result).map: _ =>
+              println(s"completed parameter pairs: ${result.rows.size}")
+        )
+        .map(_ => ())
+    else if settings.runs <= 1 then
       SimulationEngine
         .run(config)
         .flatMap(result =>
@@ -67,6 +82,7 @@ object Main:
 
     graphSpecEither.flatMap: graphSpec =>
       initialInfected(settings).map: infected =>
+        val (nodeGroups, trackedNodes) = deriveNetworkMetadata(graphSpec, settings.nodeCount)
         SimulationConfig(
           infectionProbability = settings.infectionProbability,
           recoveryProbability = settings.recoveryProbability,
@@ -78,7 +94,10 @@ object Main:
           ),
           seed = settings.seed,
           graphSpec = graphSpec,
-          collectNodeStates = settings.visualizationEnabled && settings.runs <= 1
+          collectNodeStates = settings.visualizationEnabled && settings.runs <= 1,
+          recoveryOverrides = settings.recoveryOverrides,
+          nodeGroups = nodeGroups,
+          trackedNodes = trackedNodes
         )
 
   private def initialInfected(settings: CliSettings): Either[String, Set[Int]] =
@@ -105,6 +124,20 @@ object Main:
           val values = parsed.flatten.toSet
           if values.isEmpty then Left("initial-infected must not be empty")
           else Right(values)
+
+  private def deriveNetworkMetadata(graphSpec: GraphSpec, nodeCount: Int): (Map[Int, Int], Set[Int]) =
+    graphSpec match
+      case generated: GraphSpec.Generated if generated.shape == GraphShape.ThreeClustersHub =>
+        val clusterSize = (generated.nodeCount - 1) / 3
+        val groups =
+          (0 until generated.nodeCount).iterator.map: node =>
+            if node == 0 then node -> 0
+            else
+              val clusterIndex = (node - 1) / clusterSize
+              node -> (clusterIndex + 1)
+          .toMap
+        (groups, Set(0))
+      case _ => (Map.empty, Set.empty)
 
   private def pickRandomInfected(nodeCount: Int, count: Int, seed: Long): Either[String, Set[Int]] =
     if nodeCount <= 0 then Left("nodeCount must be > 0")

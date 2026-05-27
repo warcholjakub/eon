@@ -89,6 +89,38 @@ class SimulationEngineSuite extends FunSuite:
     assertEquals(result.runs, 4)
     assertEquals(result.summaries.size, 4)
 
+  test("parameter sweep evaluates each infection and recovery combination"):
+    val config = SimulationConfig(
+      infectionProbability = 0.1,
+      recoveryProbability = 0.1,
+      initialInfected = Set(0),
+      diseaseModel = DiseaseModel.SIR,
+      stopCondition = StopCondition(stopWhenNoInfected = true, maxTicks = 2),
+      seed = 42,
+      graphSpec = GraphSpec.Generated(
+        shape = GraphShape.ErdosRenyi,
+        nodeCount = 2,
+        edgeActivation = EdgeActivation(1, 0),
+        erdosProbability = 0.0,
+        ringDegree = 0,
+        seed = 42
+      ),
+      collectNodeStates = false
+    )
+
+    val result =
+      ParameterSweepRunner
+        .run(config, minProbability = 0.05, maxProbability = 0.10, probabilityStep = 0.05, runsPerPair = 2)
+        .toOption
+        .get
+
+    assertEquals(result.runsPerPair, 2)
+    assertEquals(result.rows.size, 4)
+    assertEquals(
+      result.rows.map(row => (row.infectionProbability, row.recoveryProbability)).toSet,
+      Set((0.05, 0.05), (0.05, 0.1), (0.1, 0.05), (0.1, 0.1))
+    )
+
   test("node state collection is optional"):
     val graph = Graph.fromEdges(nodeCount = 2, rawEdges = Vector.empty).toOption.get
     val baseConfig = SimulationConfig(
@@ -198,6 +230,157 @@ class SimulationEngineSuite extends FunSuite:
 
     assertEquals(run.seed, 52L)
     assertEquals(run.graphSpec, base.graphSpec)
+
+  test("recoveryOverrides applies higher gamma to specific node"):
+    // Node 0 has γ=1.0 (recovers immediately), node 1 has γ=0.0 (never recovers).
+    // Infection starts at 0; after one tick node 0 must be recovered.
+    val graph = Graph.fromEdges(
+      nodeCount = 2,
+      rawEdges = Vector(Edge(0, 1, EdgeActivation(onTicks = 1, offTicks = 0)))
+    ).toOption.get
+
+    val config = SimulationConfig(
+      infectionProbability = 0.0,
+      recoveryProbability = 0.0,
+      initialInfected = Set(0),
+      diseaseModel = DiseaseModel.SIR,
+      stopCondition = StopCondition(stopWhenNoInfected = false, maxTicks = 2),
+      seed = 1,
+      graphSpec = GraphSpec.Generated(
+        shape = GraphShape.ErdosRenyi,
+        nodeCount = 2,
+        edgeActivation = EdgeActivation(1, 0),
+        erdosProbability = 0.0,
+        ringDegree = 0,
+        seed = 1
+      ),
+      collectNodeStates = false,
+      recoveryOverrides = Map(0 -> 1.0)
+    )
+
+    val result = SimulationEngine.runWithGraph(config, graph).toOption.get
+    assertEquals(result.summary.finalRecovered, 1)
+    assertEquals(result.summary.finalInfected, 0)
+
+  test("trackedNodes records first infection tick"):
+    // Linear chain 0-1-2. Infection starts at 0, β=1, γ=0.
+    // Node 1 gets infected at tick 1, node 2 at tick 2.
+    val graph = Graph.fromEdges(
+      nodeCount = 3,
+      rawEdges = Vector(
+        Edge(0, 1, EdgeActivation(onTicks = 1, offTicks = 0)),
+        Edge(1, 2, EdgeActivation(onTicks = 1, offTicks = 0))
+      )
+    ).toOption.get
+
+    val config = SimulationConfig(
+      infectionProbability = 1.0,
+      recoveryProbability = 0.0,
+      initialInfected = Set(0),
+      diseaseModel = DiseaseModel.SIR,
+      stopCondition = StopCondition(stopWhenNoInfected = false, maxTicks = 5),
+      seed = 1,
+      graphSpec = GraphSpec.Generated(
+        shape = GraphShape.ErdosRenyi,
+        nodeCount = 3,
+        edgeActivation = EdgeActivation(1, 0),
+        erdosProbability = 0.0,
+        ringDegree = 0,
+        seed = 1
+      ),
+      collectNodeStates = false,
+      trackedNodes = Set(1, 2)
+    )
+
+    val summary = SimulationEngine.runWithGraph(config, graph).toOption.get.summary
+    assertEquals(summary.trackedNodeFirstInfection.get(1), Some(1))
+    assertEquals(summary.trackedNodeFirstInfection.get(2), Some(2))
+
+  test("containedToInitialGroups is true when infection stays in starting cluster"):
+    // 4-node graph: cluster A = {0,1}, cluster B = {2,3}. No edges between clusters.
+    // Infection starts at 0, β=1. Should never reach cluster B.
+    val graph = Graph.fromEdges(
+      nodeCount = 4,
+      rawEdges = Vector(Edge(0, 1, EdgeActivation(onTicks = 1, offTicks = 0)))
+    ).toOption.get
+
+    val config = SimulationConfig(
+      infectionProbability = 1.0,
+      recoveryProbability = 0.0,
+      initialInfected = Set(0),
+      diseaseModel = DiseaseModel.SIR,
+      stopCondition = StopCondition(stopWhenNoInfected = false, maxTicks = 5),
+      seed = 1,
+      graphSpec = GraphSpec.Generated(
+        shape = GraphShape.ErdosRenyi,
+        nodeCount = 4,
+        edgeActivation = EdgeActivation(1, 0),
+        erdosProbability = 0.0,
+        ringDegree = 0,
+        seed = 1
+      ),
+      collectNodeStates = false,
+      nodeGroups = Map(0 -> 1, 1 -> 1, 2 -> 2, 3 -> 2)
+    )
+
+    val summary = SimulationEngine.runWithGraph(config, graph).toOption.get.summary
+    assertEquals(summary.containedToInitialGroups, Some(true))
+
+  test("containedToInitialGroups is false when infection crosses cluster boundary"):
+    // 3-node graph: cluster A = {0}, cluster B = {1,2}. Edge 0-1 bridges clusters.
+    val graph = Graph.fromEdges(
+      nodeCount = 3,
+      rawEdges = Vector(
+        Edge(0, 1, EdgeActivation(onTicks = 1, offTicks = 0)),
+        Edge(1, 2, EdgeActivation(onTicks = 1, offTicks = 0))
+      )
+    ).toOption.get
+
+    val config = SimulationConfig(
+      infectionProbability = 1.0,
+      recoveryProbability = 0.0,
+      initialInfected = Set(0),
+      diseaseModel = DiseaseModel.SIR,
+      stopCondition = StopCondition(stopWhenNoInfected = false, maxTicks = 5),
+      seed = 1,
+      graphSpec = GraphSpec.Generated(
+        shape = GraphShape.ErdosRenyi,
+        nodeCount = 3,
+        edgeActivation = EdgeActivation(1, 0),
+        erdosProbability = 0.0,
+        ringDegree = 0,
+        seed = 1
+      ),
+      collectNodeStates = false,
+      nodeGroups = Map(0 -> 1, 1 -> 2, 2 -> 2)
+    )
+
+    val summary = SimulationEngine.runWithGraph(config, graph).toOption.get.summary
+    assertEquals(summary.containedToInitialGroups, Some(false))
+
+  test("containedToInitialGroups is None when nodeGroups is empty"):
+    val graph = Graph.fromEdges(nodeCount = 2, rawEdges = Vector.empty).toOption.get
+
+    val config = SimulationConfig(
+      infectionProbability = 0.0,
+      recoveryProbability = 1.0,
+      initialInfected = Set(0),
+      diseaseModel = DiseaseModel.SIR,
+      stopCondition = StopCondition(stopWhenNoInfected = true, maxTicks = 3),
+      seed = 1,
+      graphSpec = GraphSpec.Generated(
+        shape = GraphShape.ErdosRenyi,
+        nodeCount = 2,
+        edgeActivation = EdgeActivation(1, 0),
+        erdosProbability = 0.0,
+        ringDegree = 0,
+        seed = 1
+      ),
+      collectNodeStates = false
+    )
+
+    val summary = SimulationEngine.runWithGraph(config, graph).toOption.get.summary
+    assertEquals(summary.containedToInitialGroups, None)
 
   test("SIS model moves recovered nodes back to susceptible"):
     val graph = Graph.fromEdges(nodeCount = 1, rawEdges = Vector.empty).toOption.get

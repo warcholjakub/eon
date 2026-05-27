@@ -46,6 +46,25 @@ class CliParserSuite extends FunSuite:
     val parsed = CliParser.parse(Array("--config-file", file.toString)).toOption.get
     assertEquals(parsed.visualizationEnabled, false)
 
+  test("loads parameter sweep settings from hocon"):
+    val file = Files.createTempFile("epidemic-sweep", ".conf")
+    Files.writeString(
+      file,
+      """sweep {
+        |  enabled = true
+        |  min-probability = 0.05
+        |  max-probability = 0.50
+        |  probability-step = 0.05
+        |}
+        |""".stripMargin
+    )
+
+    val parsed = CliParser.parse(Array("--config-file", file.toString)).toOption.get
+    assert(parsed.sweepEnabled)
+    assertEquals(parsed.sweepMinProbability, 0.05)
+    assertEquals(parsed.sweepMaxProbability, 0.5)
+    assertEquals(parsed.sweepProbabilityStep, 0.05)
+
   test("malformed initial-infected list in hocon returns clear error"):
     val file = Files.createTempFile("epidemic-initial-infected", ".conf")
     Files.writeString(

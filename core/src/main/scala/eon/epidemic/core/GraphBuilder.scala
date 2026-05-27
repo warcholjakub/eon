@@ -18,6 +18,8 @@ object GraphBuilder:
         case GraphShape.Ring       => buildRing(spec)
         case GraphShape.ClusteredVpn =>
           buildClusteredVpn(spec)
+        case GraphShape.ThreeClustersHub =>
+          buildThreeClustersHub(spec)
 
   private def buildErdosRenyi(spec: GraphSpec.Generated): Either[String, Graph] =
     if spec.erdosProbability < 0.0 || spec.erdosProbability > 1.0 then
@@ -78,6 +80,30 @@ object GraphBuilder:
 
         val edges = (clusterEdges(leftCluster) ++ clusterEdges(rightCluster) ++ vpnEdges).map(_.normalized)
         Graph.fromEdges(spec.nodeCount, edges.distinct)
+
+  private def buildThreeClustersHub(spec: GraphSpec.Generated): Either[String, Graph] =
+    if spec.nodeCount < 4 || (spec.nodeCount - 1) % 3 != 0 then
+      Left("nodeCount must be 1 plus a positive multiple of 3 for three-clusters-hub graph")
+    else
+      val rng = Random(spec.seed)
+      val clusterSize = (spec.nodeCount - 1) / 3
+      val clusters =
+        (0 until 3).toVector.map: index =>
+          val firstNode = 1 + index * clusterSize
+          (firstNode until (firstNode + clusterSize)).toVector
+
+      val clusterActivation = EdgeActivation(onTicks = 1, offTicks = 2)
+      val clusterEdges =
+        clusters.flatMap: nodes =>
+          nodes.indices.toVector.flatMap: leftIndex =>
+            ((leftIndex + 1) until nodes.size).toVector.map: rightIndex =>
+              Edge(nodes(leftIndex), nodes(rightIndex), randomizeActivation(clusterActivation, rng))
+
+      val hubEdges =
+        clusters.map: nodes =>
+          Edge(0, nodes.head, randomizeActivation(spec.edgeActivation, rng))
+
+      Graph.fromEdges(spec.nodeCount, clusterEdges ++ hubEdges)
 
   private def buildFromFile(spec: GraphSpec.FromFile): Either[String, Graph] =
     val loaded =
