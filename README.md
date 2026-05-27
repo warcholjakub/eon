@@ -10,7 +10,7 @@
   </p>
 </div>
 <h5 align="center">
-Scala-based epidemic simulation on a graph with SIR dynamics.
+Scala-based epidemic simulation on a graph with SIR/SIS dynamics.
 </h5>
 
 > ⚠️ **Highly experimental and under active development.** Expect breaking changes, rough edges, and the occasional missing feature.
