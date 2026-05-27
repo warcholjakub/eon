@@ -76,7 +76,8 @@ object GraphSpec:
   final case class FromFile(
       path: String,
       defaultActivation: EdgeActivation,
-      explicitNodeCount: Option[Int]
+      explicitNodeCount: Option[Int],
+      seed: Long = 0L
   ) extends GraphSpec
 
 final case class StopCondition(stopWhenNoInfected: Boolean, maxTicks: Int):

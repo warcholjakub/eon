@@ -112,11 +112,12 @@ object GraphBuilder:
     loaded.toEither.left.map: error =>
       s"failed to read graph file '${spec.path}': ${error.toString}"
     .flatMap: lines =>
+      val rng = Random(spec.seed)
       val parsed = lines.foldLeft[Either[String, Vector[Edge]]](Right(Vector.empty)):
         case (accEither, (line, index)) =>
           accEither.flatMap: acc =>
             parseEdgeLine(line, index + 1, spec.defaultActivation).map:
-              case Some(edge) => acc :+ edge
+              case Some(edge) => acc :+ edge.copy(activation = randomizeActivation(edge.activation, rng))
               case None       => acc
 
       parsed.flatMap: edges =>

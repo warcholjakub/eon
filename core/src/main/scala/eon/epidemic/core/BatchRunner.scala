@@ -32,7 +32,7 @@ object BatchRunner:
     val runGraphSpec =
       config.graphSpec match
         case generated: GraphSpec.Generated => generated.copy(seed = runSeed)
-        case other                          => other
+        case fromFile: GraphSpec.FromFile   => fromFile.copy(seed = runSeed)
 
     config.copy(seed = runSeed, graphSpec = runGraphSpec)
 

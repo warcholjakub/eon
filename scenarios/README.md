@@ -6,6 +6,7 @@ Run any scenario with:
 
 Notes:
 - Scenario 2 (grid) and 3 (scale-free) use `graph.source = file`.
+- File-backed graphs randomize each edge activation phase from the run seed while preserving its configured `on-ticks` and `off-ticks`.
 - Scenario 6 is represented by three files: initial infected count 1, 10, and 20.
 - Scenario 7 models three dense clusters connected only through one shared hub node; `graph.activation` controls every edge in this generated graph.
 - Scenario 7 sweep evaluates infection and recovery probabilities from 0.05 to 1.00 in steps of 0.05 and edge active fractions of 100%, 75%, 50%, and 25%, with 1000 runs per parameter combination.

@@ -235,7 +235,7 @@ class SimulationEngineSuite extends FunSuite:
     val generated = run.graphSpec.asInstanceOf[GraphSpec.Generated]
     assertEquals(generated.seed, 103L)
 
-  test("BatchRunner configForRun keeps file graph spec while updating simulation seed"):
+  test("BatchRunner configForRun updates file graph activation seed with simulation seed"):
     val base = SimulationConfig(
       infectionProbability = 0.2,
       recoveryProbability = 0.1,
@@ -246,7 +246,8 @@ class SimulationEngineSuite extends FunSuite:
       graphSpec = GraphSpec.FromFile(
         path = "data/graph.csv",
         defaultActivation = EdgeActivation(1, 0),
-        explicitNodeCount = Some(5)
+        explicitNodeCount = Some(5),
+        seed = 7
       ),
       collectNodeStates = false
     )
@@ -254,7 +255,8 @@ class SimulationEngineSuite extends FunSuite:
     val run = BatchRunner.configForRun(base, runIndex = 2)
 
     assertEquals(run.seed, 52L)
-    assertEquals(run.graphSpec, base.graphSpec)
+    val fromFile = run.graphSpec.asInstanceOf[GraphSpec.FromFile]
+    assertEquals(fromFile.seed, 52L)
 
   test("trackedNodes records first infection tick"):
     // Linear chain 0-1-2. Infection starts at 0, β=1, γ=0.

@@ -77,7 +77,8 @@ object Main:
                 GraphSpec.FromFile(
                   path = path,
                   defaultActivation = settings.activation,
-                  explicitNodeCount = settings.explicitNodeCount
+                  explicitNodeCount = settings.explicitNodeCount,
+                  seed = settings.seed
                 )
               )
             case None => Left("graph-file is required when graph-source=file")

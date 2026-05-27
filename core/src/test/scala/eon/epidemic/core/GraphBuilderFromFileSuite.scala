@@ -8,32 +8,46 @@ import java.nio.file.Path
 class GraphBuilderFromFileSuite extends FunSuite:
   private val defaultActivation = EdgeActivation(onTicks = 3, offTicks = 2, phase = 1)
 
-  test("from-file parses 2-column edges and ignores comments/blank lines"):
+  test("from-file parses 2-column edges and independently randomizes activation phase"):
     val path = writeTemp(
       """# comment
         |
         |0,1
         |2,3
+        |4,5
+        |6,7
         |""".stripMargin
     )
 
-    val spec = GraphSpec.FromFile(path.toString, defaultActivation, explicitNodeCount = None)
+    val spec = GraphSpec.FromFile(path.toString, defaultActivation, explicitNodeCount = None, seed = 42)
     val graph = GraphBuilder.build(spec).toOption.get
+    val repeated = GraphBuilder.build(spec).toOption.get
 
-    assertEquals(graph.nodeCount, 4)
-    assertEquals(graph.edges.size, 2)
-    assertEquals(graph.edges.map(_.endpoints).toSet, Set((0, 1), (2, 3)))
-    assert(graph.edges.forall(_.activation == defaultActivation))
+    assertEquals(graph.nodeCount, 8)
+    assertEquals(graph.edges.size, 4)
+    assertEquals(graph.edges.map(_.endpoints).toSet, Set((0, 1), (2, 3), (4, 5), (6, 7)))
+    assert(graph.edges.forall(edge => edge.activation.onTicks == 3 && edge.activation.offTicks == 2))
+    assert(graph.edges.map(_.activation.phase).distinct.size > 1)
+    assertEquals(graph, repeated)
 
-  test("from-file parses 5-column edges with explicit activation"):
+  test("from-file randomizes phase of 5-column activation while retaining its frequency"):
     val path = writeTemp("0,1,5,2,3\n")
 
-    val spec = GraphSpec.FromFile(path.toString, defaultActivation, explicitNodeCount = None)
+    val spec = GraphSpec.FromFile(path.toString, defaultActivation, explicitNodeCount = None, seed = 42)
     val graph = GraphBuilder.build(spec).toOption.get
     val edge = graph.edges.head
 
     assertEquals(graph.nodeCount, 2)
-    assertEquals(edge.activation, EdgeActivation(onTicks = 5, offTicks = 2, phase = 3))
+    assertEquals(edge.activation.onTicks, 5)
+    assertEquals(edge.activation.offTicks, 2)
+    assert(edge.activation.phase >= 0 && edge.activation.phase < 7)
+
+  test("from-file uses seed to vary activation phases between runs"):
+    val path = writeTemp((0 until 8).map(node => s"$node,${node + 1}").mkString("\n") + "\n")
+    val first = GraphBuilder.build(GraphSpec.FromFile(path.toString, defaultActivation, None, seed = 42)).toOption.get
+    val second = GraphBuilder.build(GraphSpec.FromFile(path.toString, defaultActivation, None, seed = 43)).toOption.get
+
+    assertNotEquals(first.edges.map(_.activation.phase), second.edges.map(_.activation.phase))
 
   test("from-file uses explicit node count when provided"):
     val path = writeTemp("0,1\n")
